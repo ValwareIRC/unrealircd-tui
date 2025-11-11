@@ -1,0 +1,29 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (uncomment if using go mod)
+# vendor/
+
+# Go workspace file
+go.work
+
+# Build artifacts
+utui
+tui_tool
+
+# Debug logs
+/tmp/debug.log
+
+# Config files (uncomment if you want to ignore)
+# ~/.unrealircd_manager_config
+# ~/.unrealircd_rpc_config
