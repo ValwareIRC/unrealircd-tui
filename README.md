@@ -1,7 +1,7 @@
 # UnrealIRCd Terminal Manager
 
 [![Go Version](https://img.shields.io/badge/Go-1.25.4-blue.svg)](https://golang.org/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 A powerful terminal-based user interface (TUI) for managing UnrealIRCd IRC servers. Built with Go and the tview library, this tool provides comprehensive installation, configuration, module management, and remote control capabilities for UnrealIRCd servers.
 
@@ -48,7 +48,7 @@ A powerful terminal-based user interface (TUI) for managing UnrealIRCd IRC serve
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/valware/unrealircd-tui.git
+   git clone https://github.com/ValwareIRC/unrealircd-tui.git
    cd unrealircd-scripts
    ```
 
@@ -172,11 +172,11 @@ The tool writes debug information to `/tmp/debug.log`. Check this file for detai
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
 
 ## Author
 
-Created by [Valware](https://github.com/valware)
+Created by [ValwareIRC](https://github.com/ValwareIRC)
 
 ## Acknowledgments
 
