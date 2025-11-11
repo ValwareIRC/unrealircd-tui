@@ -1250,9 +1250,9 @@ func main() {
 			}
 			usr, _ := user.Current()
 			buildDir = filepath.Join(usr.HomeDir, "unrealircd")
-			installPage(app, pages, sourceDir, buildDir)
 			config = &Config{SourceDir: sourceDir, BuildDir: buildDir, Version: version}
 			saveConfig(config)
+			mainMenuPage(app, pages, sourceDir, buildDir)
 		} else {
 			// Show selection UI
 			selectSourcePage(app, pages, sourceDirs, func(selected string) {
@@ -1264,9 +1264,9 @@ func main() {
 				}
 				usr, _ := user.Current()
 				buildDir = filepath.Join(usr.HomeDir, "unrealircd")
-				installPage(app, pages, sourceDir, buildDir)
 				config = &Config{SourceDir: sourceDir, BuildDir: buildDir, Version: version}
 				saveConfig(config)
+				mainMenuPage(app, pages, sourceDir, buildDir)
 			})
 		}
 	} else {
