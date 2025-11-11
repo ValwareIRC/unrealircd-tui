@@ -182,5 +182,4 @@ Created by [ValwareIRC](https://github.com/ValwareIRC)
 
 - [UnrealIRCd](https://www.unrealircd.org/) - The IRC daemon this tool manages
 - [tview](https://github.com/rivo/tview) - Excellent terminal UI library
-- [ObsidianIRC](https://github.com/ObsidianIRC) - RPC library for UnrealIRCd</content>
-<parameter name="filePath">/home/valerie/unrealircd-scripts/README.md
+- [ObsidianIRC](https://github.com/ObsidianIRC) - RPC library for UnrealIRCd
