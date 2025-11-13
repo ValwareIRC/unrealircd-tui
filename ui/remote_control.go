@@ -830,7 +830,6 @@ func reconfigureRPC(app *tview.Application, pages *tview.Pages, buildDir string)
 	}
 	pages.RemovePage("remote_control_menu")
 	RemoteControlMenuPage(app, pages, buildDir)
-	pages.SwitchToPage("remote_control_menu")
 }
 
 func remoteLogStreamingPage(app *tview.Application, pages *tview.Pages, config *rpc.RPCConfig, buildDir string) {
