@@ -1300,6 +1300,27 @@ var obbyScriptSubmenuFocusables []tview.Primitive
 var moduleManagerSubmenuFocusables []tview.Primitive
 
 func main() {
+	// Check for command-line arguments
+	if len(os.Args) > 1 {
+		if len(os.Args) == 3 && os.Args[1] == "--dev-test-fleet" {
+			numStr := os.Args[2]
+			numServers, err := strconv.Atoi(numStr)
+			if err != nil || numServers < 2 || numServers > 50 {
+				fmt.Fprintf(os.Stderr, "Error: Invalid number of servers. Must be between 2 and 50.\n")
+				fmt.Fprintf(os.Stderr, "Usage: %s --dev-test-fleet <number>\n", os.Args[0])
+				os.Exit(1)
+			}
+			// Run test fleet creation in CLI mode
+			runTestFleetCLI(numServers)
+			return
+		} else {
+			fmt.Fprintf(os.Stderr, "Usage: %s [--dev-test-fleet <number>]\n", os.Args[0])
+			fmt.Fprintf(os.Stderr, "  --dev-test-fleet <number>  Create a test fleet with N servers (2-50)\n")
+			os.Exit(1)
+		}
+	}
+
+	// Continue with normal GUI mode
 	app := tview.NewApplication().EnableMouse(true)
 	pages := tview.NewPages()
 
@@ -3153,15 +3174,31 @@ func testFleetPage(app *tview.Application, pages *tview.Pages) {
 }
 
 func createTestFleet(app *tview.Application, pages *tview.Pages, numServers int) {
-	// Show progress modal
-	progressModal := tview.NewModal().
-		SetText("Creating test fleet...\n\nFetching latest UnrealIRCd version...").
-		AddButtons([]string{}).
-		SetDoneFunc(func(int, string) {})
-	pages.AddPage("fleet_progress_modal", progressModal, true, true)
+	// Create a text view to show output
+	outputView := tview.NewTextView()
+	outputView.SetBorder(true).SetTitle("Test Fleet Creation Output")
+	outputView.SetDynamicColors(true)
+	outputView.SetWordWrap(true)
+	outputView.SetScrollable(true)
+
+	// Create progress modal with output view
+	flex := tview.NewFlex().SetDirection(tview.FlexRow)
+	flex.AddItem(tview.NewTextView().SetText("Creating test fleet..."), 1, 0, false)
+	flex.AddItem(outputView, 0, 1, false)
+	flex.AddItem(tview.NewTextView().SetText("Press ESC to cancel"), 1, 0, false)
+
+	pages.AddPage("fleet_progress_modal", flex, true, true)
 
 	go func() {
+		updateOutput := func(text string) {
+			app.QueueUpdateDraw(func() {
+				fmt.Fprintf(outputView, "%s\n", text)
+				outputView.ScrollToEnd()
+			})
+		}
+
 		// First, fetch the latest version info
+		updateOutput("Fetching latest UnrealIRCd version...")
 		resp, err := http.Get("https://www.unrealircd.org/downloads/list.json")
 		if err != nil {
 			app.QueueUpdateDraw(func() {
@@ -3216,11 +3253,15 @@ func createTestFleet(app *tview.Application, pages *tview.Pages, numServers int)
 			})
 			return
 		}
+		updateOutput(fmt.Sprintf("Found UnrealIRCd %s", stableVersion))
 
-		// Download the source once
-		app.QueueUpdateDraw(func() {
-			progressModal.SetText(fmt.Sprintf("Creating test fleet...\n\nDownloading UnrealIRCd %s...", stableVersion))
-		})
+		// Generate random suffix
+		randomBytes := make([]byte, 4)
+		rand.Read(randomBytes)
+		randomSuffix := hex.EncodeToString(randomBytes)[:8]
+
+		// Download the source
+		updateOutput("Downloading source...")
 
 		resp, err = http.Get(downloadURL)
 		if err != nil {
@@ -3271,11 +3312,7 @@ func createTestFleet(app *tview.Application, pages *tview.Pages, numServers int)
 			return
 		}
 		tempFile.Close()
-
-		// Generate random suffix for this fleet
-		randomBytes := make([]byte, 4)
-		rand.Read(randomBytes)
-		randomSuffix := hex.EncodeToString(randomBytes)[:8]
+		updateOutput("Download complete")
 
 		// Now create each server in the fleet
 		usr, _ := user.Current()
@@ -3288,9 +3325,7 @@ func createTestFleet(app *tview.Application, pages *tview.Pages, numServers int)
 		os.RemoveAll(sourceDir)
 
 		// Extract source once
-		app.QueueUpdateDraw(func() {
-			progressModal.SetText(fmt.Sprintf("Creating test fleet...\n\nExtracting source to %s...", sourceDir))
-		})
+		updateOutput(fmt.Sprintf("Extracting source to %s...", sourceDir))
 
 		err = extractTarGz(tempFile.Name(), sourceDir)
 		if err != nil {
@@ -3306,11 +3341,10 @@ func createTestFleet(app *tview.Application, pages *tview.Pages, numServers int)
 			})
 			return
 		}
+		updateOutput("Source extraction complete")
 
 		for i := 1; i <= numServers; i++ {
-			app.QueueUpdateDraw(func() {
-				progressModal.SetText(fmt.Sprintf("Creating test fleet...\n\nSetting up server %d of %d...", i, numServers))
-			})
+			updateOutput(fmt.Sprintf("Setting up server %d of %d...", i, numServers))
 
 			// Create build directory for this server with suffix + number
 			buildDir := filepath.Join(baseDir, fmt.Sprintf("unrealircd-fleet-%s-%d", randomSuffix, i))
@@ -3319,7 +3353,7 @@ func createTestFleet(app *tview.Application, pages *tview.Pages, numServers int)
 			os.RemoveAll(buildDir)
 
 			// Configure this server
-			err = configureFleetServer(sourceDir, buildDir, i, numServers, stableVersion)
+			err = configureFleetServerWithOutput(sourceDir, buildDir, i, numServers, stableVersion, updateOutput)
 			if err != nil {
 				app.QueueUpdateDraw(func() {
 					pages.RemovePage("fleet_progress_modal")
@@ -3333,6 +3367,7 @@ func createTestFleet(app *tview.Application, pages *tview.Pages, numServers int)
 				})
 				return
 			}
+			updateOutput(fmt.Sprintf("Server %d setup complete", i))
 		}
 
 		// Success!
@@ -3352,13 +3387,19 @@ func createTestFleet(app *tview.Application, pages *tview.Pages, numServers int)
 }
 
 func configureFleetServer(sourceDir, buildDir string, serverIndex, totalServers int, version string) error {
+	return configureFleetServerWithOutput(sourceDir, buildDir, serverIndex, totalServers, version, func(string) {})
+}
+
+func configureFleetServerWithOutput(sourceDir, buildDir string, serverIndex, totalServers int, version string, updateOutput func(string)) error {
 	// Save config.settings
+	updateOutput("  Saving configuration...")
 	err := saveConfigSettings(sourceDir, buildDir, "0600", "", "1", "2000", "classic", "auto", "", "")
 	if err != nil {
 		return fmt.Errorf("saving config.settings: %w", err)
 	}
 
 	// Run ./configure
+	updateOutput("  Running configure...")
 	cmd := exec.Command("./Config", "-quick")
 	cmd.Dir = sourceDir
 	output, err := cmd.CombinedOutput()
@@ -3367,6 +3408,7 @@ func configureFleetServer(sourceDir, buildDir string, serverIndex, totalServers 
 	}
 
 	// Run make
+	updateOutput("  Running make...")
 	cmd = exec.Command("make")
 	cmd.Dir = sourceDir
 	output, err = cmd.CombinedOutput()
@@ -3375,6 +3417,7 @@ func configureFleetServer(sourceDir, buildDir string, serverIndex, totalServers 
 	}
 
 	// Run make install
+	updateOutput("  Running make install...")
 	cmd = exec.Command("make", "install")
 	cmd.Dir = sourceDir
 	output, err = cmd.CombinedOutput()
@@ -3383,12 +3426,113 @@ func configureFleetServer(sourceDir, buildDir string, serverIndex, totalServers 
 	}
 
 	// Configure unrealircd.conf
+	updateOutput("  Configuring unrealircd.conf...")
 	err = configureFleetUnrealIRCdConf(buildDir, serverIndex, totalServers)
 	if err != nil {
 		return fmt.Errorf("configuring unrealircd.conf: %w", err)
 	}
 
 	return nil
+}
+
+func runTestFleetCLI(numServers int) {
+	fmt.Printf("Creating test fleet with %d servers...\n", numServers)
+
+	// Fetch the latest version info
+	fmt.Print("Fetching latest UnrealIRCd version... ")
+	resp, err := http.Get("https://www.unrealircd.org/downloads/list.json")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	var updateResp UpdateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&updateResp); err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing update info: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Find stable version
+	var stableVersion string
+	var downloadURL string
+	for _, versions := range updateResp {
+		if stable, ok := versions["Stable"]; ok {
+			stableVersion = stable.Version
+			downloadURL = stable.Downloads.Src
+			break
+		}
+	}
+	if stableVersion == "" || downloadURL == "" {
+		fmt.Fprintf(os.Stderr, "Error: No stable version found\n")
+		os.Exit(1)
+	}
+	fmt.Printf("Found %s\n", stableVersion)
+
+	// Generate random suffix
+	randomBytes := make([]byte, 4)
+	rand.Read(randomBytes)
+	randomSuffix := hex.EncodeToString(randomBytes)[:8]
+
+	usr, _ := user.Current()
+	baseDir := usr.HomeDir
+
+	// Download the source
+	fmt.Print("Downloading source... ")
+	tempFile, err := os.CreateTemp("", "unrealircd-fleet-*.tar.gz")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating temp file: %v\n", err)
+		os.Exit(1)
+	}
+	defer os.Remove(tempFile.Name())
+	defer tempFile.Close()
+
+	resp, err = http.Get(downloadURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error downloading: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	_, err = io.Copy(tempFile, resp.Body)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving download: %v\n", err)
+		os.Exit(1)
+	}
+	tempFile.Close()
+	fmt.Printf("Done\n")
+
+	// Create source directory
+	sourceDir := filepath.Join(baseDir, fmt.Sprintf("unrealircd-fleet-%s", randomSuffix))
+	fmt.Printf("Extracting to %s... ", sourceDir)
+	err = extractTarGz(tempFile.Name(), sourceDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error extracting: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Done\n")
+
+	// Create each server
+	for i := 1; i <= numServers; i++ {
+		fmt.Printf("\rSetting up server %d of %d... ", i, numServers)
+
+		buildDir := filepath.Join(baseDir, fmt.Sprintf("unrealircd-fleet-%s-%d", randomSuffix, i))
+
+		// Remove existing build directory
+		os.RemoveAll(buildDir)
+
+		err = configureFleetServer(sourceDir, buildDir, i, numServers, stableVersion)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\nError configuring server %d: %v\n", i, err)
+			os.Exit(1)
+		}
+	}
+	fmt.Printf("Done\n")
+
+	fmt.Printf("\nTest fleet created successfully!\n")
+	fmt.Printf("Created %d UnrealIRCd servers in spanning tree topology.\n\n", numServers)
+	fmt.Printf("Source directory: ~/unrealircd-fleet-%s\n", randomSuffix)
+	fmt.Printf("Build directories: ~/unrealircd-fleet-%s-1 through ~/unrealircd-fleet-%s-%d\n", randomSuffix, randomSuffix, numServers)
 }
 
 func configureFleetUnrealIRCdConf(buildDir string, serverIndex, totalServers int) error {
