@@ -3008,18 +3008,12 @@ Completely remove unwanted UnrealIRCd installations.`}
 	buttonBar := createButtonBar(backBtn)
 
 	// Layout
-	contentFlex := tview.NewFlex().SetDirection(tview.FlexRow)
-	contentFlex.AddItem(header, 3, 0, false).AddItem(list, 0, 2, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("Double-click or Enter: Select | b: Back"), 3, 0, false)
-
-	centeredFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(tview.NewTextView(), 0, 1, false).
-		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(tview.NewTextView(), 0, 1, false).
-			AddItem(contentFlex, 80, 0, true).
-			AddItem(textView, 0, 1, false), 0, 1, false).
-		AddItem(tview.NewTextView(), 0, 1, false)
-
-	pages.AddPage("installation_options", centeredFlex, true, true)
+	flex := tview.NewFlex().SetDirection(tview.FlexRow)
+	browserFlex := tview.NewFlex().
+		AddItem(list, 40, 0, true).
+		AddItem(textView, 0, 1, false)
+	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("Double-click or Enter: Select | b: Back"), 3, 0, false)
+	pages.AddPage("installation_options", flex, true, true)
 	app.SetFocus(list)
 }
 
