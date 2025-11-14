@@ -1448,12 +1448,88 @@ func selectSourcePage(app *tview.Application, pages *tview.Pages, sourceDirs []s
 }
 
 func installPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
+	// Check if source directory exists and prompt for deletion
+	if _, err := os.Stat(sourceDir); err == nil {
+		confirmModal := tview.NewModal().
+			SetText(fmt.Sprintf("Source directory '%s' already exists. Delete it?", sourceDir)).
+			AddButtons([]string{"No", "Yes"}).
+			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+				if buttonLabel == "Yes" {
+					err := os.RemoveAll(sourceDir)
+					if err != nil {
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Error deleting source directory: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("error_modal")
+							})
+						pages.AddPage("error_modal", errorModal, true, true)
+						return
+					}
+				}
+				// Continue to build directory check
+				checkBuildDir(app, pages, sourceDir, buildDir)
+			})
+		pages.AddPage("source_confirm", confirmModal, true, true)
+		return
+	}
+
+	// Check if build directory exists and prompt for deletion
+	checkBuildDir(app, pages, sourceDir, buildDir)
+}
+
+func checkBuildDir(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
+	if _, err := os.Stat(buildDir); err == nil {
+		confirmModal := tview.NewModal().
+			SetText(fmt.Sprintf("Build directory '%s' already exists. Delete it?", buildDir)).
+			AddButtons([]string{"No", "Yes"}).
+			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+				if buttonLabel == "Yes" {
+					err := os.RemoveAll(buildDir)
+					if err != nil {
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Error deleting build directory: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("error_modal")
+							})
+						pages.AddPage("error_modal", errorModal, true, true)
+						return
+					}
+				}
+				// Start installation
+				startInstallation(app, pages, sourceDir, buildDir)
+			})
+		pages.AddPage("build_confirm", confirmModal, true, true)
+		return
+	}
+
+	// Start installation
+	startInstallation(app, pages, sourceDir, buildDir)
+}
+
+func startInstallation(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
 	currentList = nil
 	textView := tview.NewTextView()
 	textView.SetBorder(true).SetTitle("Installation Progress")
 	textView.SetDynamicColors(true)
 	textView.SetWordWrap(true)
 	textView.SetScrollable(true)
+
+	// Create cancel button
+	cancelBtn := tview.NewButton("Cancel").SetSelectedFunc(func() {
+		confirmModal := tview.NewModal().
+			SetText("Cancel installation? This will stop the current process.").
+			AddButtons([]string{"No", "Yes"}).
+			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+				if buttonLabel == "Yes" {
+					pages.RemovePage("install")
+					mainMenuPage(app, pages, "", "")
+				}
+				pages.RemovePage("cancel_confirm")
+			})
+		pages.AddPage("cancel_confirm", confirmModal, true, true)
+	})
 
 	go func() {
 		update := func(msg string) {
@@ -1493,7 +1569,7 @@ func installPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir
 			AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 				AddItem(createHeader(), 3, 0, false).
 				AddItem(textView, 0, 1, true). // Use proportional height for full visibility
-				AddItem(createFooter("Installation in progress..."), 3, 0, false),
+				AddItem(createButtonBar(cancelBtn), 3, 0, false),
 									100, 0, false). // Wider fixed width
 			AddItem(tview.NewTextView(), 0, 1, false), // Right spacer
 								0, 1, false).
@@ -2230,11 +2306,83 @@ ADVANCED=""
 }
 
 func continueInstallation(app *tview.Application, pages *tview.Pages, sourceDir, version, buildDir string) {
+	// Check if source directory exists and prompt for deletion
+	if _, err := os.Stat(sourceDir); err == nil {
+		confirmModal := tview.NewModal().
+			SetText(fmt.Sprintf("Source directory '%s' already exists. Delete it?", sourceDir)).
+			AddButtons([]string{"No", "Yes"}).
+			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+				if buttonLabel == "Yes" {
+					err := os.RemoveAll(sourceDir)
+					if err != nil {
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Error deleting source directory: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("error_modal")
+							})
+						pages.AddPage("error_modal", errorModal, true, true)
+						return
+					}
+				}
+				// Continue to build directory check
+				continueInstallationAfterChecks(app, pages, sourceDir, version, buildDir)
+			})
+		pages.AddPage("source_confirm", confirmModal, true, true)
+		return
+	}
+
+	// Check if build directory exists and prompt for deletion
+	if _, err := os.Stat(buildDir); err == nil {
+		confirmModal := tview.NewModal().
+			SetText(fmt.Sprintf("Build directory '%s' already exists. Delete it?", buildDir)).
+			AddButtons([]string{"No", "Yes"}).
+			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+				if buttonLabel == "Yes" {
+					err := os.RemoveAll(buildDir)
+					if err != nil {
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Error deleting build directory: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("error_modal")
+							})
+						pages.AddPage("error_modal", errorModal, true, true)
+						return
+					}
+				}
+				// Start installation
+				continueInstallationAfterChecks(app, pages, sourceDir, version, buildDir)
+			})
+		pages.AddPage("build_confirm", confirmModal, true, true)
+		return
+	}
+
+	// Start installation
+	continueInstallationAfterChecks(app, pages, sourceDir, version, buildDir)
+}
+
+func continueInstallationAfterChecks(app *tview.Application, pages *tview.Pages, sourceDir, version, buildDir string) {
 	textView := tview.NewTextView()
 	textView.SetBorder(true).SetTitle(fmt.Sprintf("Installing UnrealIRCd %s", version))
 	textView.SetDynamicColors(true)
 	textView.SetWordWrap(true)
 	textView.SetScrollable(true)
+
+	// Create cancel button
+	cancelBtn := tview.NewButton("Cancel").SetSelectedFunc(func() {
+		confirmModal := tview.NewModal().
+			SetText("Cancel installation? This will stop the current process.").
+			AddButtons([]string{"No", "Yes"}).
+			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+				if buttonLabel == "Yes" {
+					pages.RemovePage("install")
+					mainMenuPage(app, pages, "", "")
+				}
+				pages.RemovePage("cancel_confirm")
+			})
+		pages.AddPage("cancel_confirm", confirmModal, true, true)
+	})
 
 	go func() {
 		update := func(msg string) {
@@ -2406,7 +2554,7 @@ func continueInstallation(app *tview.Application, pages *tview.Pages, sourceDir,
 			AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 				AddItem(createHeader(), 3, 0, false).
 				AddItem(textView, 0, 1, true). // Use proportional height for full visibility
-				AddItem(createFooter("Installation in progress..."), 3, 0, false),
+				AddItem(createButtonBar(cancelBtn), 3, 0, false),
 									100, 0, false). // Wider fixed width
 			AddItem(tview.NewTextView(), 0, 1, false), // Right spacer
 								0, 1, false).
