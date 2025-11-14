@@ -23,6 +23,40 @@ import (
 	"github.com/rivo/tview"
 )
 
+var installationTips = []string{
+	"The IRCOp guide shows how to do everyday IRCOp tasks and contains tips on fighting spam and drones.\n\nhttps://www.unrealircd.org/docs/IRCOp_guide",
+	"You can use a SSL/TLS certificate fingerprint instead of passwords in places like Oper Blocks and Link Blocks.",
+	"You can use the /SAJOIN command to force a user to join a channel. Bans and other restrictions will be bypassed.",
+	"Log files can use JSON logging. You can also send the JSON data to IRCOps on IRC.\n\nThe JSON is machine readable and contains lots of details about every log event.",
+	"What is shown in WHOIS can be configured in detail via set::whois-details.",
+	"UnrealIRCd 6 uses GeoIP by default. It is shown in WHOIS but also available as country in mask items,\n\nfor example it can be used in the TLD Block to serve a Spanish MOTD to people in Spanish speaking countries.",
+	"Almost every channel mode can be disabled. Don't like halfops? Use blacklist-module chanmodes/halfop;",
+	"If you run multiple servers then consider using Remote includes to share configuration settings.",
+	"To upgrade UnrealIRCd on *NIX simply run: ./unrealircd upgrade",
+	"You can use a SSL/TLS certificate fingerprints to exempt trusted users from server bans or allow them to send more commands per second.",
+	"Use set::restrict-commands to prevent new users from executing certain commands like LIST. Useful against drones/spam.",
+	"Channel mode +P makes a channel permanent. The topic and modes are preserved,\n\neven if all users leave the channel, and even if the server is restarted thanks to channeldb.",
+	"If you don't want to receive private messages, set user mode +D. You can also force it on all users.\n\nOr, if you only want to allow private messages from people who are identified to Services then set +R.",
+	"Don't like snomasks / server notices? Then configure logging to a channel.",
+	"You can add a Webhook that is called on certain log events.\n\nThis can be used to automate things or to notify you in case of trouble.",
+	"Consider contributing to make UnrealIRCd even better: reporting bugs, testing, helping out with support, ..",
+	"On IRC you can use the HELPOP command to read about various IRC commands.",
+	"Exempt your IP address from bans, just in case you or a fellow IRCOp accidentally GLINES you.",
+	"If you still have users on plaintext port 6667, consider enabling Strict Transport Security to gently move users to SSL/TLS on port 6697.",
+	"The Security article gives hands-on tips on how to deal with drone attacks, flooding, spammers, (D)DoS and more.",
+	"Check out Special users on how to give trusted users/bots more rights without making them IRCOp.",
+	"With the UnrealIRCd administration panel you can add and remove server bans and do other server management from your browser.",
+	"If you want to bypass access checks for channels as an IRCOp, use SAMODE or SAJOIN. Or use OperOverride.",
+	"You can exempt users dynamically from server bans, spamfilter, maxperip and other restrictions with the ELINE command on IRC.",
+	"The blacklist { } block can be used to ban known troublemakers that are listed in blacklists like EfnetRBL and DroneBL.",
+	"Channel mode +H provides Channel history to modern clients. Optionally, it can be stored on-disk to be preserved between server restarts.",
+	"Channel anti-flood protection is on by default (since UnrealIRCd 6.2.0). You can override the default profile via +F.",
+	"Connthrottle will limit the damage from big drone attacks. Check if the flood thresholds and exceptions are OK for your network.",
+	"Did you know that users are put in the security-group known-users based on their reputation score or if they are identified to Services?\n\nUsers in this group receive a number of benefits, such as being able to send more messages per minute.",
+	"The antirandom module can be a useful tool to block clients with random looking nicks.",
+	"You can allow trusted users to send more messages per second without having to make them IRCOp. Especially useful for bots.",
+}
+
 type FocusableTextView struct {
 	*tview.TextView
 }
@@ -1486,6 +1520,25 @@ func startInstallation(app *tview.Application, pages *tview.Pages, sourceDir, bu
 	textView.SetWordWrap(true)
 	textView.SetScrollable(true)
 
+	// Create tip display
+	tipView := tview.NewTextView()
+	tipView.SetBorder(true).SetTitle("Tips and Tricks")
+	tipView.SetDynamicColors(true)
+	tipView.SetWordWrap(true)
+	tipView.SetScrollable(true)
+
+	// Start tip rotation
+	go func() {
+		tipIndex := 0
+		for {
+			app.QueueUpdateDraw(func() {
+				tipView.SetText(installationTips[tipIndex])
+			})
+			tipIndex = (tipIndex + 1) % len(installationTips)
+			time.Sleep(20 * time.Second)
+		}
+	}()
+
 	// Create cancel button
 	cancelBtn := tview.NewButton("Cancel").SetSelectedFunc(func() {
 		confirmModal := tview.NewModal().
@@ -1538,9 +1591,12 @@ func startInstallation(app *tview.Application, pages *tview.Pages, sourceDir, bu
 			AddItem(tview.NewTextView(), 0, 1, false). // Left spacer
 			AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 				AddItem(createHeader(), 3, 0, false).
-				AddItem(textView, 0, 1, true). // Use proportional height for full visibility
+				AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
+					AddItem(textView, 0, 2, true). // Installation progress takes 2/3
+					AddItem(tipView, 0, 1, false), // Tip takes 1/3
+					0, 1, false). // Equal height for progress and tip
 				AddItem(createButtonBar(cancelBtn), 3, 0, false),
-									100, 0, false). // Wider fixed width
+									120, 0, false). // Even wider for both views
 			AddItem(tview.NewTextView(), 0, 1, false), // Right spacer
 								0, 1, false).
 		AddItem(tview.NewTextView(), 0, 1, false) // Bottom spacer
@@ -2318,6 +2374,25 @@ func continueInstallationAfterChecks(app *tview.Application, pages *tview.Pages,
 	textView.SetWordWrap(true)
 	textView.SetScrollable(true)
 
+	// Create tip display
+	tipView := tview.NewTextView()
+	tipView.SetBorder(true).SetTitle("Tip of the Day")
+	tipView.SetDynamicColors(true)
+	tipView.SetWordWrap(true)
+	tipView.SetScrollable(true)
+
+	// Start tip rotation
+	go func() {
+		tipIndex := 0
+		for {
+			app.QueueUpdateDraw(func() {
+				tipView.SetText(installationTips[tipIndex])
+			})
+			tipIndex = (tipIndex + 1) % len(installationTips)
+			time.Sleep(20 * time.Second)
+		}
+	}()
+
 	// Create cancel button
 	cancelBtn := tview.NewButton("Cancel").SetSelectedFunc(func() {
 		confirmModal := tview.NewModal().
@@ -2502,9 +2577,12 @@ func continueInstallationAfterChecks(app *tview.Application, pages *tview.Pages,
 			AddItem(tview.NewTextView(), 0, 1, false). // Left spacer
 			AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 				AddItem(createHeader(), 3, 0, false).
-				AddItem(textView, 0, 1, true). // Use proportional height for full visibility
+				AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
+					AddItem(textView, 0, 2, true). // Installation progress takes 2/3
+					AddItem(tipView, 0, 1, false), // Tip takes 1/3
+					0, 1, false). // Equal height for progress and tip
 				AddItem(createButtonBar(cancelBtn), 3, 0, false),
-									100, 0, false). // Wider fixed width
+									120, 0, false). // Even wider for both views
 			AddItem(tview.NewTextView(), 0, 1, false), // Right spacer
 								0, 1, false).
 		AddItem(tview.NewTextView(), 0, 1, false) // Bottom spacer
