@@ -1752,24 +1752,15 @@ Features:
 • Remote server administration without direct access
 
 Connect to your UnrealIRCd server's RPC interface for live control.`,
-		"• Set up new UnrealIRCd install": `Set up a new UnrealIRCd installation.
+		"• Installation Options": `Manage UnrealIRCd installations.
 
 Features:
-• Download the latest stable UnrealIRCd source code
-• Extract and configure in a new directory
-• Automatic build directory setup
-• Prepare for compilation and installation
+• Set up new UnrealIRCd installations
+• Switch between existing installations
+• Uninstall and remove installations
+• Manage multiple UnrealIRCd versions
 
-Create a fresh UnrealIRCd installation alongside existing ones.`,
-		"• Switch UnrealIRCd install": `Switch between installed UnrealIRCd versions.
-
-Features:
-• List all detected UnrealIRCd source directories
-• View version information for each install
-• Switch configuration to use a different version
-• Automatic build directory adjustment
-
-Easily switch between multiple UnrealIRCd installations.`,
+Complete installation management for your IRC server.`,
 		"• ObbyScript": `Manage ObbyScript installation and scripts.
 
 Features:
@@ -1785,8 +1776,7 @@ Extend your IRC server functionality with custom scripts and automation.`}
 	list.SetBorder(true).SetBorderColor(tcell.ColorGreen)
 	list.AddItem("• Module Manager", "  Manage UnrealIRCd C modules", 0, nil)
 	list.AddItem("• Check for Updates", "  Check for available UnrealIRCd updates", 0, nil)
-	list.AddItem("• Set up new UnrealIRCd install", "  Set up a new UnrealIRCd installation", 0, nil)
-	list.AddItem("• Switch UnrealIRCd install", "  Switch between installed UnrealIRCd versions", 0, nil)
+	list.AddItem("• Installation Options", "  Manage UnrealIRCd installations", 0, nil)
 	list.AddItem("• Remote Control (RPC)", "  Control UnrealIRCd server via JSON-RPC API", 0, nil)
 	list.AddItem("• ObbyScript", "  Manage ObbyScript installation and scripts", 0, nil)
 
@@ -1809,10 +1799,8 @@ Extend your IRC server functionality with custom scripts and automation.`}
 				moduleManagerSubmenuPage(app, pages, sourceDir, buildDir)
 			case "• Check for Updates":
 				checkForUpdatesPage(app, pages, sourceDir, buildDir)
-			case "• Set up new UnrealIRCd install":
-				setupNewInstallPage(app, pages)
-			case "• Switch UnrealIRCd install":
-				switchInstallPage(app, pages)
+			case "• Installation Options":
+				installationOptionsPage(app, pages, sourceDir, buildDir)
 			case "• Remote Control (RPC)":
 				ui.RemoteControlMenuPage(app, pages, buildDir)
 			case "• ObbyScript":
@@ -1830,10 +1818,8 @@ Extend your IRC server functionality with custom scripts and automation.`}
 			moduleManagerSubmenuPage(app, pages, sourceDir, buildDir)
 		case "• Check for Updates":
 			checkForUpdatesPage(app, pages, sourceDir, buildDir)
-		case "• Set up new UnrealIRCd install":
-			setupNewInstallPage(app, pages)
-		case "• Switch UnrealIRCd install":
-			switchInstallPage(app, pages)
+		case "• Installation Options":
+			installationOptionsPage(app, pages, sourceDir, buildDir)
 		case "• Remote Control (RPC)":
 			ui.RemoteControlMenuPage(app, pages, buildDir)
 		case "• ObbyScript":
@@ -2921,6 +2907,253 @@ Use this when you want to stop using scripts entirely.`}
 	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
 	pages.AddPage("obby_script_submenu", flex, true, true)
 	obbyScriptSubmenuFocusables = []tview.Primitive{list, textView, backBtn}
+}
+
+func installationOptionsPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
+	// Text view on right for descriptions
+	textView := &FocusableTextView{tview.NewTextView()}
+	textView.SetBorder(true).SetTitle("Description")
+	textView.SetDynamicColors(true)
+	textView.SetWordWrap(true)
+	textView.SetScrollable(true)
+
+	// Descriptions for Installation Options submenu
+	descriptions := map[string]string{
+		"• Set up new UnrealIRCd install": `Set up a new UnrealIRCd installation.
+
+Features:
+• Download the latest stable UnrealIRCd source code
+• Extract and configure in a new directory
+• Automatic build directory setup
+• Prepare for compilation and installation
+
+Create a fresh UnrealIRCd installation alongside existing ones.`,
+		"• Switch UnrealIRCd install": `Switch between installed UnrealIRCd versions.
+
+Features:
+• List all detected UnrealIRCd source directories
+• View version information for each install
+• Switch configuration to use a different version
+• Automatic build directory adjustment
+
+Easily switch between multiple UnrealIRCd installations.`,
+		"• Uninstall UnrealIRCd": `Remove an existing UnrealIRCd installation.
+
+Features:
+• Select from detected installations
+• Delete both source and build directories
+• Clean removal of all installation files
+• Automatic configuration cleanup
+
+Completely remove unwanted UnrealIRCd installations.`}
+
+	list := tview.NewList()
+	list.SetBorder(true).SetBorderColor(tcell.ColorGreen)
+	list.SetTitle("Installation Options")
+	list.AddItem("• Set up new UnrealIRCd install", "  Set up a new UnrealIRCd installation", 0, nil)
+	list.AddItem("• Switch UnrealIRCd install", "  Switch between installed UnrealIRCd versions", 0, nil)
+	list.AddItem("• Uninstall UnrealIRCd", "  Remove an existing UnrealIRCd installation", 0, nil)
+
+	currentList = list
+
+	header := createHeader()
+
+	var lastClickTime time.Time
+	var lastClickIndex = -1
+
+	list.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		if desc, ok := descriptions[mainText]; ok {
+			textView.SetText(desc)
+		}
+		now := time.Now()
+		if index == lastClickIndex && now.Sub(lastClickTime) < 300*time.Millisecond {
+			// Double-click detected
+			switch mainText {
+			case "• Set up new UnrealIRCd install":
+				setupNewInstallPage(app, pages)
+			case "• Switch UnrealIRCd install":
+				switchInstallPage(app, pages)
+			case "• Uninstall UnrealIRCd":
+				uninstallUnrealIRCdPage(app, pages)
+			}
+		}
+		lastClickIndex = index
+		lastClickTime = now
+	})
+
+	list.SetSelectedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		// For Enter key
+		switch mainText {
+		case "• Set up new UnrealIRCd install":
+			setupNewInstallPage(app, pages)
+		case "• Switch UnrealIRCd install":
+			switchInstallPage(app, pages)
+		case "• Uninstall UnrealIRCd":
+			uninstallUnrealIRCdPage(app, pages)
+		}
+	})
+
+	list.SetInputCapture(nil) // Remove custom input capture
+
+	// Set initial description
+	if len(descriptions) > 0 {
+		textView.SetText(descriptions["• Set up new UnrealIRCd install"])
+	}
+
+	backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
+		pages.RemovePage("installation_options")
+		pages.SwitchToPage("main_menu")
+	})
+
+	buttonBar := createButtonBar(backBtn)
+
+	// Layout
+	contentFlex := tview.NewFlex().SetDirection(tview.FlexRow)
+	contentFlex.AddItem(header, 3, 0, false).AddItem(list, 0, 2, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("Double-click or Enter: Select | b: Back"), 3, 0, false)
+
+	centeredFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(tview.NewTextView(), 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(tview.NewTextView(), 0, 1, false).
+			AddItem(contentFlex, 80, 0, true).
+			AddItem(textView, 0, 1, false), 0, 1, false).
+		AddItem(tview.NewTextView(), 0, 1, false)
+
+	pages.AddPage("installation_options", centeredFlex, true, true)
+	app.SetFocus(list)
+}
+
+func uninstallUnrealIRCdPage(app *tview.Application, pages *tview.Pages) {
+	// Scan for source dirs
+	sourceDirs, err := scanSourceDirs()
+	if err != nil {
+		errorModal := tview.NewModal().
+			SetText(fmt.Sprintf("Error scanning source dirs: %v", err)).
+			AddButtons([]string{"OK"}).
+			SetDoneFunc(func(int, string) {
+				pages.RemovePage("scan_error_modal")
+			})
+		pages.AddPage("scan_error_modal", errorModal, true, true)
+		return
+	}
+
+	if len(sourceDirs) == 0 {
+		errorModal := tview.NewModal().
+			SetText("No UnrealIRCd installations found to uninstall.").
+			AddButtons([]string{"OK"}).
+			SetDoneFunc(func(int, string) {
+				pages.RemovePage("no_installs_modal")
+			})
+		pages.AddPage("no_installs_modal", errorModal, true, true)
+		return
+	}
+
+	// Create list with installations
+	list := tview.NewList()
+	list.SetBorder(true).SetTitle("Select Installation to Uninstall")
+	list.SetBorderColor(tcell.ColorRed)
+
+	for _, dir := range sourceDirs {
+		version, err := getUnrealIRCdVersion(dir)
+		if err != nil {
+			version = "Unknown"
+		}
+
+		// Get build directory
+		buildDir, err := getBasePathFromConfig(dir)
+		if err != nil {
+			// Fallback to version-based path
+			usr, _ := user.Current()
+			buildDir = filepath.Join(usr.HomeDir, "unrealircd")
+			if version != "" {
+				buildDir = filepath.Join(usr.HomeDir, "unrealircd-"+version)
+			}
+		}
+
+		displayName := fmt.Sprintf("UnrealIRCd %s", version)
+		secondaryText := fmt.Sprintf("Source: %s | Build: %s", dir, buildDir)
+		list.AddItem(displayName, secondaryText, 0, nil)
+	}
+
+	list.SetSelectedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		selectedSourceDir := sourceDirs[index]
+
+		// Get version and build dir
+		version, err := getUnrealIRCdVersion(selectedSourceDir)
+		if err != nil {
+			version = "Unknown"
+		}
+
+		buildDir, err := getBasePathFromConfig(selectedSourceDir)
+		if err != nil {
+			usr, _ := user.Current()
+			buildDir = filepath.Join(usr.HomeDir, "unrealircd")
+			if version != "" {
+				buildDir = filepath.Join(usr.HomeDir, "unrealircd-"+version)
+			}
+		}
+
+		// Confirm uninstallation
+		confirmModal := tview.NewModal().
+			SetText(fmt.Sprintf("Uninstall UnrealIRCd %s?\n\nThis will permanently delete:\n• Source directory: %s\n• Build directory: %s\n\nThis action cannot be undone!", version, selectedSourceDir, buildDir)).
+			AddButtons([]string{"Cancel", "Uninstall"}).
+			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+				if buttonLabel == "Uninstall" {
+					// Delete source directory
+					err := os.RemoveAll(selectedSourceDir)
+					sourceDeleted := err == nil
+
+					// Delete build directory
+					err = os.RemoveAll(buildDir)
+					buildDeleted := err == nil
+
+					// Show result
+					var message string
+					if sourceDeleted && buildDeleted {
+						message = fmt.Sprintf("Successfully uninstalled UnrealIRCd %s.\n\nDeleted source and build directories.", version)
+					} else if sourceDeleted {
+						message = fmt.Sprintf("Partially uninstalled UnrealIRCd %s.\n\nDeleted source directory, but failed to delete build directory: %v", version, err)
+					} else if buildDeleted {
+						message = fmt.Sprintf("Partially uninstalled UnrealIRCd %s.\n\nDeleted build directory, but failed to delete source directory.", version)
+					} else {
+						message = fmt.Sprintf("Failed to uninstall UnrealIRCd %s.\n\nCould not delete directories.", version)
+					}
+
+					resultModal := tview.NewModal().
+						SetText(message).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("uninstall_result_modal")
+							pages.RemovePage("uninstall_confirm")
+							// Refresh the list by going back
+							uninstallUnrealIRCdPage(app, pages)
+						})
+					pages.AddPage("uninstall_result_modal", resultModal, true, true)
+				} else {
+					pages.RemovePage("uninstall_confirm")
+				}
+			})
+		pages.AddPage("uninstall_confirm", confirmModal, true, true)
+	})
+
+	backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
+		pages.RemovePage("uninstall_unrealircd")
+		pages.SwitchToPage("installation_options")
+	})
+
+	buttonBar := createButtonBar(backBtn)
+
+	// Layout
+	contentFlex := tview.NewFlex().SetDirection(tview.FlexRow)
+	contentFlex.AddItem(createHeader(), 3, 0, false).AddItem(list, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("Enter: Select installation to uninstall | b: Back"), 3, 0, false)
+
+	centeredFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(tview.NewTextView(), 0, 1, false).
+		AddItem(contentFlex, 100, 0, true).
+		AddItem(tview.NewTextView(), 0, 1, false)
+
+	pages.AddPage("uninstall_unrealircd", centeredFlex, true, true)
+	app.SetFocus(list)
 }
 
 func moduleManagerSubmenuPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
