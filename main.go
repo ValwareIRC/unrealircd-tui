@@ -2941,6 +2941,7 @@ Features:
 • Validate configuration files
 • Test module loading and functionality
 • Performance and health checks
+• Test Fleet - Create multiple linked UnrealIRCd instances
 
 Comprehensive testing suite for UnrealIRCd installations.`,
 		"• Resources": `Access development resources and documentation.
@@ -2976,7 +2977,7 @@ Development resources and documentation for UnrealIRCd.`}
 			// Double-click detected
 			switch mainText {
 			case "• Tests":
-				// TODO: Implement tests page
+				testsSubmenuPage(app, pages, sourceDir, buildDir)
 			case "• Resources":
 				// TODO: Implement resources page
 			}
@@ -2989,7 +2990,7 @@ Development resources and documentation for UnrealIRCd.`}
 		// For Enter key
 		switch mainText {
 		case "• Tests":
-			// TODO: Implement tests page
+			testsSubmenuPage(app, pages, sourceDir, buildDir)
 		case "• Resources":
 			// TODO: Implement resources page
 		}
@@ -3017,6 +3018,445 @@ Development resources and documentation for UnrealIRCd.`}
 	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
 	pages.AddPage("dev_tools_submenu", flex, true, true)
 	app.SetFocus(list)
+}
+
+func testsSubmenuPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
+	// Text view on right for descriptions
+	textView := &FocusableTextView{tview.NewTextView()}
+	textView.SetBorder(true).SetTitle("Description")
+	textView.SetDynamicColors(true)
+	textView.SetWordWrap(true)
+	textView.SetScrollable(true)
+
+	// Descriptions for Tests submenu
+	descriptions := map[string]string{
+		"• Test Fleet": `Create a test fleet of linked UnrealIRCd servers.
+
+Features:
+• Choose number of servers (2-50)
+• Automatic download of latest UnrealIRCd
+• Dynamic installation to separate directories
+• Automatic configuration with unique server names
+• Link block generation and application
+• Spanning tree topology (not mesh)
+
+Create a test network of interconnected UnrealIRCd servers for testing purposes.`}
+
+	list := tview.NewList()
+	list.SetBorder(true).SetBorderColor(tcell.ColorYellow)
+	list.SetTitle("Tests")
+	list.AddItem("• Test Fleet", "  Create a test fleet of linked UnrealIRCd servers", 0, nil)
+
+	currentList = list
+
+	header := createHeader()
+
+	var lastClickTime time.Time
+	var lastClickIndex = -1
+
+	list.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		if desc, ok := descriptions[mainText]; ok {
+			textView.SetText(desc)
+		}
+		now := time.Now()
+		if index == lastClickIndex && now.Sub(lastClickTime) < 300*time.Millisecond {
+			// Double-click detected
+			switch mainText {
+			case "• Test Fleet":
+				testFleetPage(app, pages)
+			}
+		}
+		lastClickIndex = index
+		lastClickTime = now
+	})
+
+	list.SetSelectedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		// For Enter key
+		switch mainText {
+		case "• Test Fleet":
+			testFleetPage(app, pages)
+		}
+	})
+
+	list.SetInputCapture(nil) // Remove custom input capture
+
+	// Set initial description
+	if len(descriptions) > 0 {
+		textView.SetText(descriptions["• Test Fleet"])
+	}
+
+	backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
+		pages.RemovePage("tests_submenu")
+		pages.SwitchToPage("dev_tools_submenu")
+	})
+
+	buttonBar := createButtonBar(backBtn)
+
+	// Layout
+	flex := tview.NewFlex().SetDirection(tview.FlexRow)
+	browserFlex := tview.NewFlex().
+		AddItem(list, 40, 0, true).
+		AddItem(textView, 0, 1, false)
+	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
+	pages.AddPage("tests_submenu", flex, true, true)
+	app.SetFocus(list)
+}
+
+func testFleetPage(app *tview.Application, pages *tview.Pages) {
+	// Create a form for number input
+	form := tview.NewForm()
+	form.SetBorder(true).SetTitle("Test Fleet Setup")
+	form.SetBorderColor(tcell.ColorYellow)
+
+	// Add number input field
+	form.AddInputField("Number of servers (2-50)", "2", 10, func(text string, ch rune) bool {
+		// Only allow digits
+		return (ch >= '0' && ch <= '9') || ch == 0
+	}, nil)
+
+	// Add buttons
+	form.AddButton("Create Fleet", func() {
+		numStr := form.GetFormItem(0).(*tview.InputField).GetText()
+		numServers, err := strconv.Atoi(numStr)
+		if err != nil || numServers < 2 || numServers > 50 {
+			errorModal := tview.NewModal().
+				SetText("Please enter a valid number between 2 and 50.").
+				AddButtons([]string{"OK"}).
+				SetDoneFunc(func(int, string) {
+					pages.RemovePage("fleet_error_modal")
+				})
+			pages.AddPage("fleet_error_modal", errorModal, true, true)
+			return
+		}
+
+		// Start fleet creation process
+		createTestFleet(app, pages, numServers)
+	})
+
+	form.AddButton("Cancel", func() {
+		pages.RemovePage("test_fleet")
+		pages.SwitchToPage("tests_submenu")
+	})
+
+	// Layout
+	flex := tview.NewFlex().SetDirection(tview.FlexRow)
+	flex.AddItem(createHeader(), 3, 0, false)
+	flex.AddItem(tview.NewTextView(), 1, 0, false) // Spacer
+	flex.AddItem(form, 10, 0, true)
+	flex.AddItem(tview.NewTextView(), 1, 0, false) // Spacer
+	flex.AddItem(createFooter("Enter: Select | Tab: Next Field | Esc: Cancel"), 3, 0, false)
+
+	pages.AddPage("test_fleet", flex, true, true)
+	app.SetFocus(form)
+}
+
+func createTestFleet(app *tview.Application, pages *tview.Pages, numServers int) {
+	// Show progress modal
+	progressModal := tview.NewModal().
+		SetText("Creating test fleet...\n\nFetching latest UnrealIRCd version...").
+		AddButtons([]string{}).
+		SetDoneFunc(func(int, string) {})
+	pages.AddPage("fleet_progress_modal", progressModal, true, true)
+
+	go func() {
+		// First, fetch the latest version info
+		resp, err := http.Get("https://www.unrealircd.org/downloads/list.json")
+		if err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("fleet_progress_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Error fetching updates: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("fleet_fetch_error_modal")
+					})
+				pages.AddPage("fleet_fetch_error_modal", errorModal, true, true)
+			})
+			return
+		}
+		defer resp.Body.Close()
+
+		var updateResp UpdateResponse
+		if err := json.NewDecoder(resp.Body).Decode(&updateResp); err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("fleet_progress_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Error parsing update info: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("fleet_parse_error_modal")
+					})
+				pages.AddPage("fleet_parse_error_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		// Find stable version
+		var stableVersion string
+		var downloadURL string
+		for _, versions := range updateResp {
+			if stable, ok := versions["Stable"]; ok {
+				stableVersion = stable.Version
+				downloadURL = stable.Downloads.Src
+				break
+			}
+		}
+		if stableVersion == "" || downloadURL == "" {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("fleet_progress_modal")
+				errorModal := tview.NewModal().
+					SetText("No stable version found in update info.").
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("fleet_no_stable_modal")
+					})
+				pages.AddPage("fleet_no_stable_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		// Download the source once
+		app.QueueUpdateDraw(func() {
+			progressModal.SetText(fmt.Sprintf("Creating test fleet...\n\nDownloading UnrealIRCd %s...", stableVersion))
+		})
+
+		resp, err = http.Get(downloadURL)
+		if err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("fleet_progress_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Error downloading source: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("fleet_download_error_modal")
+					})
+				pages.AddPage("fleet_download_error_modal", errorModal, true, true)
+			})
+			return
+		}
+		defer resp.Body.Close()
+
+		// Create temp file for the downloaded archive
+		tempFile, err := os.CreateTemp("", "unrealircd-fleet-*.tar.gz")
+		if err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("fleet_progress_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Error creating temp file: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("fleet_temp_error_modal")
+					})
+				pages.AddPage("fleet_temp_error_modal", errorModal, true, true)
+			})
+			return
+		}
+		defer os.Remove(tempFile.Name())
+		defer tempFile.Close()
+
+		_, err = io.Copy(tempFile, resp.Body)
+		if err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("fleet_progress_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Error saving download: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("fleet_save_error_modal")
+					})
+				pages.AddPage("fleet_save_error_modal", errorModal, true, true)
+			})
+			return
+		}
+		tempFile.Close()
+
+		// Now create each server in the fleet
+		usr, _ := user.Current()
+		baseDir := usr.HomeDir
+
+		for i := 1; i <= numServers; i++ {
+			app.QueueUpdateDraw(func() {
+				progressModal.SetText(fmt.Sprintf("Creating test fleet...\n\nSetting up server %d of %d...", i, numServers))
+			})
+
+			// Create directory for this server
+			serverDir := filepath.Join(baseDir, fmt.Sprintf("unrealircd-fleet-%d", i))
+			buildDir := filepath.Join(baseDir, fmt.Sprintf("unrealircd-fleet-build-%d", i))
+
+			// Remove existing directories if they exist
+			os.RemoveAll(serverDir)
+			os.RemoveAll(buildDir)
+
+			// Extract source
+			err = extractTarGz(tempFile.Name(), serverDir)
+			if err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("fleet_progress_modal")
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Error extracting source for server %d: %v", i, err)).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("fleet_extract_error_modal")
+						})
+					pages.AddPage("fleet_extract_error_modal", errorModal, true, true)
+				})
+				return
+			}
+
+			// Configure this server
+			err = configureFleetServer(serverDir, buildDir, i, numServers, stableVersion)
+			if err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("fleet_progress_modal")
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Error configuring server %d: %v", i, err)).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("fleet_config_error_modal")
+						})
+					pages.AddPage("fleet_config_error_modal", errorModal, true, true)
+				})
+				return
+			}
+		}
+
+		// Success!
+		app.QueueUpdateDraw(func() {
+			pages.RemovePage("fleet_progress_modal")
+			successModal := tview.NewModal().
+				SetText(fmt.Sprintf("Test fleet created successfully!\n\nCreated %d UnrealIRCd servers in spanning tree topology.\n\nServer directories: ~/unrealircd-fleet-1 through ~/unrealircd-fleet-%d\nBuild directories: ~/unrealircd-fleet-build-1 through ~/unrealircd-fleet-build-%d", numServers, numServers, numServers)).
+				AddButtons([]string{"OK"}).
+				SetDoneFunc(func(int, string) {
+					pages.RemovePage("fleet_success_modal")
+					pages.RemovePage("test_fleet")
+					pages.SwitchToPage("tests_submenu")
+				})
+			pages.AddPage("fleet_success_modal", successModal, true, true)
+		})
+	}()
+}
+
+func configureFleetServer(sourceDir, buildDir string, serverIndex, totalServers int, version string) error {
+	// Save config.settings
+	err := saveConfigSettings(sourceDir, buildDir, "0600", "", "1", "2000", "classic", "auto", "", "")
+	if err != nil {
+		return fmt.Errorf("saving config.settings: %w", err)
+	}
+
+	// Run ./configure
+	cmd := exec.Command("./configure", "--with-bindir="+buildDir+"/bin", "--with-datadir="+buildDir+"/data", "--with-logdir="+buildDir+"/logs", "--with-modulesdir="+buildDir+"/modules", "--with-confdir="+buildDir+"/conf", "--with-pidfile="+buildDir+"/ircd.pid", "--with-tmpdir="+buildDir+"/tmp", "--with-scriptdir="+buildDir+"/scripts", "--with-cachedir="+buildDir+"/cache")
+	cmd.Dir = sourceDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("running configure: %w\nOutput: %s", err, string(output))
+	}
+
+	// Run make
+	cmd = exec.Command("make")
+	cmd.Dir = sourceDir
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("running make: %w\nOutput: %s", err, string(output))
+	}
+
+	// Run make install
+	cmd = exec.Command("make", "install")
+	cmd.Dir = sourceDir
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("running make install: %w\nOutput: %s", err, string(output))
+	}
+
+	// Configure unrealircd.conf
+	err = configureFleetUnrealIRCdConf(buildDir, serverIndex, totalServers)
+	if err != nil {
+		return fmt.Errorf("configuring unrealircd.conf: %w", err)
+	}
+
+	return nil
+}
+
+func configureFleetUnrealIRCdConf(buildDir string, serverIndex, totalServers int) error {
+	confFile := filepath.Join(buildDir, "conf", "unrealircd.conf")
+
+	// Read the config file
+	content, err := os.ReadFile(confFile)
+	if err != nil {
+		return fmt.Errorf("reading config file: %w", err)
+	}
+
+	// Replace the 'me' block with unique server name
+	serverName := fmt.Sprintf("irc%d.testfleet.local", serverIndex)
+	meBlock := fmt.Sprintf(`me {
+	name "%s";
+	info "Test Fleet Server %d";
+	numeric 1;
+};`, serverName, serverIndex)
+
+	// Use regex to replace the me block
+	meRegex := regexp.MustCompile(`(?s)me\s*\{[^}]*\};`)
+	content = meRegex.ReplaceAllLiteral(content, []byte(meBlock))
+
+	// Add link blocks for spanning tree topology
+	var linkBlocks strings.Builder
+
+	// If this is not the first server, connect to the previous server
+	if serverIndex > 1 {
+		prevServerName := fmt.Sprintf("irc%d.testfleet.local", serverIndex-1)
+		linkBlocks.WriteString(fmt.Sprintf(`
+
+link %s {
+	incoming {
+		mask *;
+	}
+	outgoing {
+		hostname "127.0.0.1";
+		port %d;
+		options { tls; autoconnect; }
+	}
+	password "testfleetpassword%d" { spkifp; }
+	class servers;
+};`, prevServerName, 6660+serverIndex-1, serverIndex-1))
+	}
+
+	// If this is not the last server, prepare for the next server to connect
+	if serverIndex < totalServers {
+		nextServerName := fmt.Sprintf("irc%d.testfleet.local", serverIndex+1)
+		linkBlocks.WriteString(fmt.Sprintf(`
+
+/* Link block for %s - to be added to server %d's config:
+link %s {
+	incoming {
+		mask *;
+	}
+	outgoing {
+		hostname "127.0.0.1";
+		port %d;
+		options { tls; autoconnect; }
+	}
+	password "testfleetpassword%d" { spkifp; }
+	class servers;
+};
+*/`, nextServerName, serverIndex+1, serverName, 6660+serverIndex, serverIndex))
+	}
+
+	// Add link blocks before the closing bracket of the file
+	contentStr := string(content)
+	if linkBlocks.Len() > 0 {
+		// Find the last closing brace and add link blocks before it
+		lastBraceIndex := strings.LastIndex(contentStr, "}")
+		if lastBraceIndex != -1 {
+			contentStr = contentStr[:lastBraceIndex] + linkBlocks.String() + "\n}" + contentStr[lastBraceIndex+1:]
+		}
+	}
+
+	// Write back the modified config
+	err = os.WriteFile(confFile, []byte(contentStr), 0644)
+	if err != nil {
+		return fmt.Errorf("writing config file: %w", err)
+	}
+
+	return nil
 }
 
 func installationOptionsPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
