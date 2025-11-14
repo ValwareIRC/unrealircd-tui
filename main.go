@@ -1460,6 +1460,7 @@ func installPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir
 		update := func(msg string) {
 			app.QueueUpdateDraw(func() {
 				fmt.Fprintf(textView, "%s\n", msg)
+				textView.ScrollToEnd()
 			})
 		}
 
@@ -2239,6 +2240,7 @@ func continueInstallation(app *tview.Application, pages *tview.Pages, sourceDir,
 		update := func(msg string) {
 			app.QueueUpdateDraw(func() {
 				fmt.Fprintf(textView, "%s\n", msg)
+				textView.ScrollToEnd()
 			})
 		}
 
