@@ -1770,7 +1770,16 @@ Features:
 • Automatic configuration management
 • Syntax highlighting and code preview
 
-Extend your IRC server functionality with custom scripts and automation.`}
+Extend your IRC server functionality with custom scripts and automation.`,
+		"• Dev Tools": `Developer tools and utilities.
+
+Features:
+• Run tests and diagnostics
+• Access development resources
+• Debug and troubleshooting tools
+• Development utilities and helpers
+
+Tools for developers working with UnrealIRCd.`}
 
 	list := tview.NewList()
 	list.SetBorder(true).SetBorderColor(tcell.ColorGreen)
@@ -1779,6 +1788,7 @@ Extend your IRC server functionality with custom scripts and automation.`}
 	list.AddItem("• Installation Options", "  Manage UnrealIRCd installations", 0, nil)
 	list.AddItem("• Remote Control (RPC)", "  Control UnrealIRCd server via JSON-RPC API", 0, nil)
 	list.AddItem("• ObbyScript", "  Manage ObbyScript installation and scripts", 0, nil)
+	list.AddItem("• Dev Tools", "  Developer tools and utilities", 0, nil)
 
 	currentList = list
 
@@ -1805,6 +1815,8 @@ Extend your IRC server functionality with custom scripts and automation.`}
 				ui.RemoteControlMenuPage(app, pages, buildDir)
 			case "• ObbyScript":
 				obbyScriptSubmenuPage(app, pages, sourceDir, buildDir)
+			case "• Dev Tools":
+				devToolsSubmenuPage(app, pages, sourceDir, buildDir)
 			}
 		}
 		lastClickIndex = index
@@ -1824,6 +1836,8 @@ Extend your IRC server functionality with custom scripts and automation.`}
 			ui.RemoteControlMenuPage(app, pages, buildDir)
 		case "• ObbyScript":
 			obbyScriptSubmenuPage(app, pages, sourceDir, buildDir)
+		case "• Dev Tools":
+			devToolsSubmenuPage(app, pages, sourceDir, buildDir)
 		}
 	})
 
@@ -2907,6 +2921,102 @@ Use this when you want to stop using scripts entirely.`}
 	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
 	pages.AddPage("obby_script_submenu", flex, true, true)
 	obbyScriptSubmenuFocusables = []tview.Primitive{list, textView, backBtn}
+}
+
+func devToolsSubmenuPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
+	// Text view on right for descriptions
+	textView := &FocusableTextView{tview.NewTextView()}
+	textView.SetBorder(true).SetTitle("Description")
+	textView.SetDynamicColors(true)
+	textView.SetWordWrap(true)
+	textView.SetScrollable(true)
+
+	// Descriptions for Dev Tools submenu
+	descriptions := map[string]string{
+		"• Tests": `Run tests and diagnostics.
+
+Features:
+• Execute unit tests and integration tests
+• Run diagnostic checks on installations
+• Validate configuration files
+• Test module loading and functionality
+• Performance and health checks
+
+Comprehensive testing suite for UnrealIRCd installations.`,
+		"• Resources": `Access development resources and documentation.
+
+Features:
+• View UnrealIRCd documentation and guides
+• Access API references and specifications
+• Browse development tools and utilities
+• View configuration examples and templates
+• Access community resources and support
+
+Development resources and documentation for UnrealIRCd.`}
+
+	list := tview.NewList()
+	list.SetBorder(true).SetBorderColor(tcell.ColorGreen)
+	list.SetTitle("Dev Tools")
+	list.AddItem("• Tests", "  Run tests and diagnostics", 0, nil)
+	list.AddItem("• Resources", "  Access development resources and documentation", 0, nil)
+
+	currentList = list
+
+	header := createHeader()
+
+	var lastClickTime time.Time
+	var lastClickIndex = -1
+
+	list.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		if desc, ok := descriptions[mainText]; ok {
+			textView.SetText(desc)
+		}
+		now := time.Now()
+		if index == lastClickIndex && now.Sub(lastClickTime) < 300*time.Millisecond {
+			// Double-click detected
+			switch mainText {
+			case "• Tests":
+				// TODO: Implement tests page
+			case "• Resources":
+				// TODO: Implement resources page
+			}
+		}
+		lastClickIndex = index
+		lastClickTime = now
+	})
+
+	list.SetSelectedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		// For Enter key
+		switch mainText {
+		case "• Tests":
+			// TODO: Implement tests page
+		case "• Resources":
+			// TODO: Implement resources page
+		}
+	})
+
+	list.SetInputCapture(nil) // Remove custom input capture
+
+	// Set initial description
+	if len(descriptions) > 0 {
+		textView.SetText(descriptions["• Tests"])
+	}
+
+	backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
+		pages.RemovePage("dev_tools_submenu")
+		pages.SwitchToPage("main_menu")
+	})
+
+	buttonBar := createButtonBar(backBtn)
+
+	// Layout
+	flex := tview.NewFlex().SetDirection(tview.FlexRow)
+	browserFlex := tview.NewFlex().
+		AddItem(list, 40, 0, true).
+		AddItem(textView, 0, 1, false)
+	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
+	pages.AddPage("dev_tools_submenu", flex, true, true)
+	app.SetFocus(list)
 }
 
 func installationOptionsPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
