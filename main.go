@@ -3392,6 +3392,12 @@ func configureFleetServer(sourceDir, buildDir string, serverIndex, totalServers 
 }
 
 func configureFleetUnrealIRCdConf(buildDir string, serverIndex, totalServers int) error {
+	// First, ensure unrealircd.conf exists by copying from example.conf
+	err := setupConfigFile(buildDir)
+	if err != nil {
+		return fmt.Errorf("setting up config file: %w", err)
+	}
+
 	confFile := filepath.Join(buildDir, "conf", "unrealircd.conf")
 
 	// Read the config file
