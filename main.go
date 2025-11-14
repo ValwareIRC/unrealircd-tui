@@ -19,8 +19,8 @@ import (
 	"time"
 	"utui/ui"
 
-	"github.com/rivo/tview"
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
 
 type FocusableTextView struct {
@@ -448,12 +448,12 @@ const (
 	configFile = ".unrealircd_tui_config"
 
 	// Menu item constants
-	MenuBrowseScripts = "Browse GitHub Scripts (ObbyScript)"
-	MenuViewInstalled = "View Installed Scripts (ObbyScript)"
-	MenuBrowseModules = "Browse UnrealIRCd Third-Party Modules (C)"
-	MenuCheckModules = "Check Installed Modules"
+	MenuBrowseScripts       = "Browse GitHub Scripts (ObbyScript)"
+	MenuViewInstalled       = "View Installed Scripts (ObbyScript)"
+	MenuBrowseModules       = "Browse UnrealIRCd Third-Party Modules (C)"
+	MenuCheckModules        = "Check Installed Modules"
 	MenuUninstallObbyScript = "Uninstall ObbyScript"
-	MenuRemoteControl = "Remote Control (RPC)"
+	MenuRemoteControl       = "Remote Control (RPC)"
 )
 
 type Config struct {
@@ -565,7 +565,6 @@ func getBasePathFromConfig(sourceDir string) (string, error) {
 	}
 	return matches[1], nil
 }
-
 
 func buildAndInstall(sourceDir string, updateFunc func(string)) error {
 	// Build
@@ -866,11 +865,11 @@ func createButtonBar(buttons ...*tview.Button) *tview.Flex {
 
 type SyntaxTextArea struct {
 	*tview.TextView
-	text      []rune
-	cursor    int
-	title     string
-	changed   func()
-	saveFunc  func()
+	text       []rune
+	cursor     int
+	title      string
+	changed    func()
+	saveFunc   func()
 	cancelFunc func()
 }
 
@@ -1047,18 +1046,18 @@ type GitHubItem struct {
 }
 
 type Module struct {
-	Name                   string
-	Description            string
-	Version                string
-	Author                 string
-	Documentation          string
-	Troubleshooting        string
-	Source                 string
-	Sha256sum              string
-	LastUpdated            string
-	MinUnrealircdVersion   string
-	MaxUnrealircdVersion   string
-	PostInstallText        []string
+	Name                 string
+	Description          string
+	Version              string
+	Author               string
+	Documentation        string
+	Troubleshooting      string
+	Source               string
+	Sha256sum            string
+	LastUpdated          string
+	MinUnrealircdVersion string
+	MaxUnrealircdVersion string
+	PostInstallText      []string
 }
 
 func fetchRepoContents(owner, repo, path, ref string) ([]GitHubItem, error) {
@@ -1429,7 +1428,7 @@ func selectSourcePage(app *tview.Application, pages *tview.Pages, sourceDirs []s
 	contentFlex.AddItem(createHeader(), 3, 0, false).AddItem(list, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("Enter: Select | q: Quit"), 3, 0, false)
 
 	// Auto-size height based on content
-	contentHeight := len(sourceDirs) + 8  // items + title + buttons + footer + padding
+	contentHeight := len(sourceDirs) + 8 // items + title + buttons + footer + padding
 	if contentHeight < 15 {
 		contentHeight = 15
 	}
@@ -1460,7 +1459,13 @@ func installPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir
 		update := func(msg string) {
 			app.QueueUpdateDraw(func() {
 				fmt.Fprintf(textView, "%s\n", msg)
-				textView.ScrollToEnd()
+				// Scroll to end after a brief delay to ensure text is rendered
+				go func() {
+					time.Sleep(10 * time.Millisecond)
+					app.QueueUpdateDraw(func() {
+						textView.ScrollToEnd()
+					})
+				}()
 			})
 		}
 
@@ -1493,11 +1498,11 @@ func installPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir
 			AddItem(tview.NewTextView(), 0, 1, false). // Left spacer
 			AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 				AddItem(createHeader(), 3, 0, false).
-				AddItem(textView, 20, 0, false). // Fixed height for better visibility
+				AddItem(textView, 20, 0, true). // Fixed height for better visibility - NOW FOCUSED
 				AddItem(createFooter("Installation in progress..."), 3, 0, false),
-				80, 0, false). // Fixed width
+									80, 0, false). // Fixed width
 			AddItem(tview.NewTextView(), 0, 1, false), // Right spacer
-			0, 1, false).
+								0, 1, false).
 		AddItem(tview.NewTextView(), 0, 1, false) // Bottom spacer
 
 	pages.AddPage("install", flex, true, true)
@@ -2224,7 +2229,7 @@ SANITIZER="%s"
 EXTRAPARA="%s"
 ADVANCED=""
 `, basePath, basePath, basePath, basePath, basePath, basePath, basePath, basePath, basePath, basePath,
-   maxConn, nickHist, geoip, defPerm, sslDir, remoteInc, sanitizer, extraPara)
+		maxConn, nickHist, geoip, defPerm, sslDir, remoteInc, sanitizer, extraPara)
 
 	return os.WriteFile(configPath, []byte(content), 0644)
 }
@@ -2240,7 +2245,13 @@ func continueInstallation(app *tview.Application, pages *tview.Pages, sourceDir,
 		update := func(msg string) {
 			app.QueueUpdateDraw(func() {
 				fmt.Fprintf(textView, "%s\n", msg)
-				textView.ScrollToEnd()
+				// Scroll to end after a brief delay to ensure text is rendered
+				go func() {
+					time.Sleep(10 * time.Millisecond)
+					app.QueueUpdateDraw(func() {
+						textView.ScrollToEnd()
+					})
+				}()
 			})
 		}
 
@@ -2405,11 +2416,11 @@ func continueInstallation(app *tview.Application, pages *tview.Pages, sourceDir,
 			AddItem(tview.NewTextView(), 0, 1, false). // Left spacer
 			AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 				AddItem(createHeader(), 3, 0, false).
-				AddItem(textView, 20, 0, false). // Fixed height for better visibility
+				AddItem(textView, 20, 0, true). // Fixed height for better visibility - NOW FOCUSED
 				AddItem(createFooter("Installation in progress..."), 3, 0, false),
-				80, 0, false). // Fixed width
+									80, 0, false). // Fixed width
 			AddItem(tview.NewTextView(), 0, 1, false), // Right spacer
-			0, 1, false).
+								0, 1, false).
 		AddItem(tview.NewTextView(), 0, 1, false) // Bottom spacer
 
 	pages.AddPage("install", flex, true, true)
