@@ -567,15 +567,83 @@ func getBasePathFromConfig(sourceDir string) (string, error) {
 }
 
 
-func buildAndInstall(sourceDir string) error {
+func buildAndInstall(sourceDir string, updateFunc func(string)) error {
+	// Build
+	updateFunc("Running 'make'...")
 	cmd := exec.Command("make")
 	cmd.Dir = sourceDir
-	if err := cmd.Run(); err != nil {
+
+	// Capture stdout and stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
 		return err
 	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	// Read output in real-time
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			updateFunc("[make] " + line)
+		}
+	}()
+
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			updateFunc("[make] " + line)
+		}
+	}()
+
+	if err := cmd.Wait(); err != nil {
+		return err
+	}
+
+	// Install
+	updateFunc("Running 'make install'...")
 	cmd = exec.Command("make", "install")
 	cmd.Dir = sourceDir
-	return cmd.Run()
+
+	stdout, err = cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err = cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	// Read output in real-time
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			updateFunc("[make install] " + line)
+		}
+	}()
+
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			updateFunc("[make install] " + line)
+		}
+	}()
+
+	return cmd.Wait()
 }
 
 func setupConfigs(buildDir string) error {
@@ -1386,6 +1454,7 @@ func installPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir
 	textView.SetBorder(true).SetTitle("Installation Progress")
 	textView.SetDynamicColors(true)
 	textView.SetWordWrap(true)
+	textView.SetScrollable(true)
 
 	go func() {
 		update := func(msg string) {
@@ -1394,8 +1463,8 @@ func installPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir
 			})
 		}
 
-		update("Building and installing...")
-		if err := buildAndInstall(sourceDir); err != nil {
+		update("Starting installation...")
+		if err := buildAndInstall(sourceDir, update); err != nil {
 			update(fmt.Sprintf("Error: %v", err))
 			return
 		}
@@ -1416,8 +1485,20 @@ func installPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir
 		})
 	}()
 
-	flex := tview.NewFlex().SetDirection(tview.FlexRow)
-	flex.AddItem(createHeader(), 3, 0, false).AddItem(textView, 0, 1, true).AddItem(createFooter("q: Quit"), 3, 0, false)
+	// Create a centered modal-like layout for the build output
+	flex := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(tview.NewTextView(), 0, 1, false). // Top spacer
+		AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
+			AddItem(tview.NewTextView(), 0, 1, false). // Left spacer
+			AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+				AddItem(createHeader(), 3, 0, false).
+				AddItem(textView, 20, 0, false). // Fixed height for better visibility
+				AddItem(createFooter("Installation in progress..."), 3, 0, false),
+				80, 0, false). // Fixed width
+			AddItem(tview.NewTextView(), 0, 1, false), // Right spacer
+			0, 1, false).
+		AddItem(tview.NewTextView(), 0, 1, false) // Bottom spacer
+
 	pages.AddPage("install", flex, true, true)
 }
 
@@ -2148,91 +2229,151 @@ ADVANCED=""
 }
 
 func continueInstallation(app *tview.Application, pages *tview.Pages, sourceDir, version, buildDir string) {
-	// Show progress modal
-	progressModal := tview.NewModal().
-		SetText(fmt.Sprintf("Installing UnrealIRCd %s...\n\nConfiguring...", version)).
-		AddButtons([]string{}).
-		SetDoneFunc(func(int, string) {})
-	pages.AddPage("install_progress_modal", progressModal, true, true)
+	textView := tview.NewTextView()
+	textView.SetBorder(true).SetTitle(fmt.Sprintf("Installing UnrealIRCd %s", version))
+	textView.SetDynamicColors(true)
+	textView.SetWordWrap(true)
+	textView.SetScrollable(true)
 
 	go func() {
+		update := func(msg string) {
+			app.QueueUpdateDraw(func() {
+				fmt.Fprintf(textView, "%s\n", msg)
+			})
+		}
+
+		update("Running ./Config -quick...")
 		// Run ./Config -quick to apply the config.settings
 		configCmd := exec.Command("./Config", "-quick")
 		configCmd.Dir = sourceDir
-		configOutput, err := configCmd.CombinedOutput()
+
+		// Capture output
+		configStdout, err := configCmd.StdoutPipe()
 		if err != nil {
-			app.QueueUpdateDraw(func() {
-				pages.RemovePage("install_progress_modal")
-				errorModal := tview.NewModal().
-					SetText(fmt.Sprintf("Error running ./Config -quick: %v\nOutput: %s", err, string(configOutput))).
-					AddButtons([]string{"OK"}).
-					SetDoneFunc(func(int, string) {
-						pages.RemovePage("config_quick_error_modal")
-					})
-				pages.AddPage("config_quick_error_modal", errorModal, true, true)
-			})
+			update(fmt.Sprintf("Error setting up config pipe: %v", err))
+			return
+		}
+		configStderr, err := configCmd.StderrPipe()
+		if err != nil {
+			update(fmt.Sprintf("Error setting up config pipe: %v", err))
 			return
 		}
 
-		// Update progress
-		app.QueueUpdateDraw(func() {
-			progressModal.SetText(fmt.Sprintf("Installing UnrealIRCd %s...\n\nCompiling...", version))
-		})
+		if err := configCmd.Start(); err != nil {
+			update(fmt.Sprintf("Error starting ./Config: %v", err))
+			return
+		}
 
-		// Run make
+		// Read config output
+		go func() {
+			scanner := bufio.NewScanner(configStdout)
+			for scanner.Scan() {
+				line := scanner.Text()
+				update(fmt.Sprintf("[Config] %s", line))
+			}
+		}()
+		go func() {
+			scanner := bufio.NewScanner(configStderr)
+			for scanner.Scan() {
+				line := scanner.Text()
+				update(fmt.Sprintf("[Config] %s", line))
+			}
+		}()
+
+		if err := configCmd.Wait(); err != nil {
+			update(fmt.Sprintf("Error running ./Config -quick: %v", err))
+			return
+		}
+
+		update("Running make...")
+		// Run make with real-time output
 		makeCmd := exec.Command("make")
 		makeCmd.Dir = sourceDir
-		makeOutput, err := makeCmd.CombinedOutput()
+
+		makeStdout, err := makeCmd.StdoutPipe()
 		if err != nil {
-			app.QueueUpdateDraw(func() {
-				pages.RemovePage("install_progress_modal")
-				errorModal := tview.NewModal().
-					SetText(fmt.Sprintf("Error running make: %v\nOutput: %s", err, string(makeOutput))).
-					AddButtons([]string{"OK"}).
-					SetDoneFunc(func(int, string) {
-						pages.RemovePage("make_error_modal")
-					})
-				pages.AddPage("make_error_modal", errorModal, true, true)
-			})
+			update(fmt.Sprintf("Error setting up make pipe: %v", err))
+			return
+		}
+		makeStderr, err := makeCmd.StderrPipe()
+		if err != nil {
+			update(fmt.Sprintf("Error setting up make pipe: %v", err))
 			return
 		}
 
-		// Update progress
-		app.QueueUpdateDraw(func() {
-			progressModal.SetText(fmt.Sprintf("Installing UnrealIRCd %s...\n\nInstalling...", version))
-		})
+		if err := makeCmd.Start(); err != nil {
+			update(fmt.Sprintf("Error starting make: %v", err))
+			return
+		}
 
-		// Run make install
+		// Read make output
+		go func() {
+			scanner := bufio.NewScanner(makeStdout)
+			for scanner.Scan() {
+				line := scanner.Text()
+				update(fmt.Sprintf("[make] %s", line))
+			}
+		}()
+		go func() {
+			scanner := bufio.NewScanner(makeStderr)
+			for scanner.Scan() {
+				line := scanner.Text()
+				update(fmt.Sprintf("[make] %s", line))
+			}
+		}()
+
+		if err := makeCmd.Wait(); err != nil {
+			update(fmt.Sprintf("Error running make: %v", err))
+			return
+		}
+
+		update("Running make install...")
+		// Run make install with real-time output
 		installCmd := exec.Command("make", "install")
 		installCmd.Dir = sourceDir
-		installOutput, err := installCmd.CombinedOutput()
+
+		installStdout, err := installCmd.StdoutPipe()
 		if err != nil {
-			app.QueueUpdateDraw(func() {
-				pages.RemovePage("install_progress_modal")
-				errorModal := tview.NewModal().
-					SetText(fmt.Sprintf("Error running make install: %v\nOutput: %s", err, string(installOutput))).
-					AddButtons([]string{"OK"}).
-					SetDoneFunc(func(int, string) {
-						pages.RemovePage("install_error_modal")
-					})
-				pages.AddPage("install_error_modal", errorModal, true, true)
-			})
+			update(fmt.Sprintf("Error setting up install pipe: %v", err))
+			return
+		}
+		installStderr, err := installCmd.StderrPipe()
+		if err != nil {
+			update(fmt.Sprintf("Error setting up install pipe: %v", err))
 			return
 		}
 
+		if err := installCmd.Start(); err != nil {
+			update(fmt.Sprintf("Error starting make install: %v", err))
+			return
+		}
+
+		// Read install output
+		go func() {
+			scanner := bufio.NewScanner(installStdout)
+			for scanner.Scan() {
+				line := scanner.Text()
+				update(fmt.Sprintf("[make install] %s", line))
+			}
+		}()
+		go func() {
+			scanner := bufio.NewScanner(installStderr)
+			for scanner.Scan() {
+				line := scanner.Text()
+				update(fmt.Sprintf("[make install] %s", line))
+			}
+		}()
+
+		if err := installCmd.Wait(); err != nil {
+			update(fmt.Sprintf("Error running make install: %v", err))
+			return
+		}
+
+		update("Setting up configuration...")
 		// Set up config
 		err = setupConfigFile(buildDir)
 		if err != nil {
-			app.QueueUpdateDraw(func() {
-				pages.RemovePage("install_progress_modal")
-				errorModal := tview.NewModal().
-					SetText(fmt.Sprintf("Error setting up config file: %v", err)).
-					AddButtons([]string{"OK"}).
-					SetDoneFunc(func(int, string) {
-						pages.RemovePage("config_setup_error_modal")
-					})
-				pages.AddPage("config_setup_error_modal", errorModal, true, true)
-			})
+			update(fmt.Sprintf("Error setting up config file: %v", err))
 			return
 		}
 
@@ -2244,32 +2385,32 @@ func continueInstallation(app *tview.Application, pages *tview.Pages, sourceDir,
 		}
 		err = saveConfig(config)
 		if err != nil {
-			app.QueueUpdateDraw(func() {
-				pages.RemovePage("install_progress_modal")
-				errorModal := tview.NewModal().
-					SetText(fmt.Sprintf("Error saving config: %v", err)).
-					AddButtons([]string{"OK"}).
-					SetDoneFunc(func(int, string) {
-						pages.RemovePage("config_save_error_modal")
-					})
-				pages.AddPage("config_save_error_modal", errorModal, true, true)
-			})
+			update(fmt.Sprintf("Error saving config: %v", err))
 			return
 		}
 
-		// Success
+		update("Installation complete!")
 		app.QueueUpdateDraw(func() {
-			pages.RemovePage("install_progress_modal")
-			successModal := tview.NewModal().
-				SetText(fmt.Sprintf("UnrealIRCd %s installed successfully!\n\nSource: %s\nBuild: %s\n\nInstallation complete with configuration file ready.", version, sourceDir, buildDir)).
-				AddButtons([]string{"OK"}).
-				SetDoneFunc(func(int, string) {
-					pages.RemovePage("install_success_modal")
-					pages.SwitchToPage("main_menu")
-				})
-			pages.AddPage("install_success_modal", successModal, true, true)
+			pages.RemovePage("install")
+			mainMenuPage(app, pages, sourceDir, buildDir)
 		})
 	}()
+
+	// Create a centered modal-like layout for the build output
+	flex := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(tview.NewTextView(), 0, 1, false). // Top spacer
+		AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
+			AddItem(tview.NewTextView(), 0, 1, false). // Left spacer
+			AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+				AddItem(createHeader(), 3, 0, false).
+				AddItem(textView, 20, 0, false). // Fixed height for better visibility
+				AddItem(createFooter("Installation in progress..."), 3, 0, false),
+				80, 0, false). // Fixed width
+			AddItem(tview.NewTextView(), 0, 1, false), // Right spacer
+			0, 1, false).
+		AddItem(tview.NewTextView(), 0, 1, false) // Bottom spacer
+
+	pages.AddPage("install", flex, true, true)
 }
 
 func setupConfigFile(buildDir string) error {
