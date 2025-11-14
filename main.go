@@ -1459,13 +1459,7 @@ func installPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir
 		update := func(msg string) {
 			app.QueueUpdateDraw(func() {
 				fmt.Fprintf(textView, "%s\n", msg)
-				// Scroll to end after a brief delay to ensure text is rendered
-				go func() {
-					time.Sleep(10 * time.Millisecond)
-					app.QueueUpdateDraw(func() {
-						textView.ScrollToEnd()
-					})
-				}()
+				textView.ScrollToEnd()
 			})
 		}
 
@@ -1498,14 +1492,15 @@ func installPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir
 			AddItem(tview.NewTextView(), 0, 1, false). // Left spacer
 			AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 				AddItem(createHeader(), 3, 0, false).
-				AddItem(textView, 20, 0, true). // Fixed height for better visibility - NOW FOCUSED
+				AddItem(textView, 0, 1, true). // Use proportional height for full visibility
 				AddItem(createFooter("Installation in progress..."), 3, 0, false),
-									80, 0, false). // Fixed width
+									100, 0, false). // Wider fixed width
 			AddItem(tview.NewTextView(), 0, 1, false), // Right spacer
 								0, 1, false).
 		AddItem(tview.NewTextView(), 0, 1, false) // Bottom spacer
 
 	pages.AddPage("install", flex, true, true)
+	app.SetFocus(textView) // Ensure textView gets focus immediately
 }
 
 func highlightLine(line string) string {
@@ -2245,13 +2240,7 @@ func continueInstallation(app *tview.Application, pages *tview.Pages, sourceDir,
 		update := func(msg string) {
 			app.QueueUpdateDraw(func() {
 				fmt.Fprintf(textView, "%s\n", msg)
-				// Scroll to end after a brief delay to ensure text is rendered
-				go func() {
-					time.Sleep(10 * time.Millisecond)
-					app.QueueUpdateDraw(func() {
-						textView.ScrollToEnd()
-					})
-				}()
+				textView.ScrollToEnd()
 			})
 		}
 
@@ -2416,14 +2405,15 @@ func continueInstallation(app *tview.Application, pages *tview.Pages, sourceDir,
 			AddItem(tview.NewTextView(), 0, 1, false). // Left spacer
 			AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 				AddItem(createHeader(), 3, 0, false).
-				AddItem(textView, 20, 0, true). // Fixed height for better visibility - NOW FOCUSED
+				AddItem(textView, 0, 1, true). // Use proportional height for full visibility
 				AddItem(createFooter("Installation in progress..."), 3, 0, false),
-									80, 0, false). // Fixed width
+									100, 0, false). // Wider fixed width
 			AddItem(tview.NewTextView(), 0, 1, false), // Right spacer
 								0, 1, false).
 		AddItem(tview.NewTextView(), 0, 1, false) // Bottom spacer
 
 	pages.AddPage("install", flex, true, true)
+	app.SetFocus(textView) // Ensure textView gets focus immediately
 }
 
 func setupConfigFile(buildDir string) error {
