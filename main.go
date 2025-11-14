@@ -1448,37 +1448,7 @@ func selectSourcePage(app *tview.Application, pages *tview.Pages, sourceDirs []s
 }
 
 func installPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
-	// Check if source directory exists and prompt for deletion
-	if _, err := os.Stat(sourceDir); err == nil {
-		confirmModal := tview.NewModal().
-			SetText(fmt.Sprintf("Source directory '%s' already exists. Delete it?", sourceDir)).
-			AddButtons([]string{"No", "Yes"}).
-			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-				if buttonLabel == "Yes" {
-					err := os.RemoveAll(sourceDir)
-					if err != nil {
-						errorModal := tview.NewModal().
-							SetText(fmt.Sprintf("Error deleting source directory: %v", err)).
-							AddButtons([]string{"OK"}).
-							SetDoneFunc(func(int, string) {
-								pages.RemovePage("error_modal")
-							})
-						pages.AddPage("error_modal", errorModal, true, true)
-						return
-					}
-				}
-				// Continue to build directory check
-				checkBuildDir(app, pages, sourceDir, buildDir)
-			})
-		pages.AddPage("source_confirm", confirmModal, true, true)
-		return
-	}
-
 	// Check if build directory exists and prompt for deletion
-	checkBuildDir(app, pages, sourceDir, buildDir)
-}
-
-func checkBuildDir(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
 	if _, err := os.Stat(buildDir); err == nil {
 		confirmModal := tview.NewModal().
 			SetText(fmt.Sprintf("Build directory '%s' already exists. Delete it?", buildDir)).
@@ -2084,6 +2054,37 @@ func setupNewInstallPage(app *tview.Application, pages *tview.Pages) {
 }
 
 func downloadAndExtract(app *tview.Application, pages *tview.Pages, version, downloadURL, sourceDir string) {
+	// Check if source directory exists and prompt for deletion
+	if _, err := os.Stat(sourceDir); err == nil {
+		confirmModal := tview.NewModal().
+			SetText(fmt.Sprintf("Source directory '%s' already exists. Delete it?", sourceDir)).
+			AddButtons([]string{"No", "Yes"}).
+			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+				if buttonLabel == "Yes" {
+					err := os.RemoveAll(sourceDir)
+					if err != nil {
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Error deleting source directory: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("error_modal")
+							})
+						pages.AddPage("error_modal", errorModal, true, true)
+						return
+					}
+				}
+				// Start the actual download
+				startDownloadAndExtract(app, pages, version, downloadURL, sourceDir)
+			})
+		pages.AddPage("source_confirm", confirmModal, true, true)
+		return
+	}
+
+	// Start the actual download
+	startDownloadAndExtract(app, pages, version, downloadURL, sourceDir)
+}
+
+func startDownloadAndExtract(app *tview.Application, pages *tview.Pages, version, downloadURL, sourceDir string) {
 	// Show progress modal
 	progressModal := tview.NewModal().
 		SetText(fmt.Sprintf("Setting up UnrealIRCd %s...\n\nDownloading source...", version)).
@@ -2306,58 +2307,6 @@ ADVANCED=""
 }
 
 func continueInstallation(app *tview.Application, pages *tview.Pages, sourceDir, version, buildDir string) {
-	// Check if source directory exists and prompt for deletion
-	if _, err := os.Stat(sourceDir); err == nil {
-		confirmModal := tview.NewModal().
-			SetText(fmt.Sprintf("Source directory '%s' already exists. Delete it?", sourceDir)).
-			AddButtons([]string{"No", "Yes"}).
-			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-				if buttonLabel == "Yes" {
-					err := os.RemoveAll(sourceDir)
-					if err != nil {
-						errorModal := tview.NewModal().
-							SetText(fmt.Sprintf("Error deleting source directory: %v", err)).
-							AddButtons([]string{"OK"}).
-							SetDoneFunc(func(int, string) {
-								pages.RemovePage("error_modal")
-							})
-						pages.AddPage("error_modal", errorModal, true, true)
-						return
-					}
-				}
-				// Continue to build directory check
-				continueInstallationAfterChecks(app, pages, sourceDir, version, buildDir)
-			})
-		pages.AddPage("source_confirm", confirmModal, true, true)
-		return
-	}
-
-	// Check if build directory exists and prompt for deletion
-	if _, err := os.Stat(buildDir); err == nil {
-		confirmModal := tview.NewModal().
-			SetText(fmt.Sprintf("Build directory '%s' already exists. Delete it?", buildDir)).
-			AddButtons([]string{"No", "Yes"}).
-			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-				if buttonLabel == "Yes" {
-					err := os.RemoveAll(buildDir)
-					if err != nil {
-						errorModal := tview.NewModal().
-							SetText(fmt.Sprintf("Error deleting build directory: %v", err)).
-							AddButtons([]string{"OK"}).
-							SetDoneFunc(func(int, string) {
-								pages.RemovePage("error_modal")
-							})
-						pages.AddPage("error_modal", errorModal, true, true)
-						return
-					}
-				}
-				// Start installation
-				continueInstallationAfterChecks(app, pages, sourceDir, version, buildDir)
-			})
-		pages.AddPage("build_confirm", confirmModal, true, true)
-		return
-	}
-
 	// Start installation
 	continueInstallationAfterChecks(app, pages, sourceDir, version, buildDir)
 }
