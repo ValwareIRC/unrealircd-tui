@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"bufio"
 	"compress/gzip"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -3270,41 +3272,54 @@ func createTestFleet(app *tview.Application, pages *tview.Pages, numServers int)
 		}
 		tempFile.Close()
 
+		// Generate random suffix for this fleet
+		randomBytes := make([]byte, 4)
+		rand.Read(randomBytes)
+		randomSuffix := hex.EncodeToString(randomBytes)[:8]
+
 		// Now create each server in the fleet
 		usr, _ := user.Current()
 		baseDir := usr.HomeDir
+
+		// Create the shared source directory with random suffix
+		sourceDir := filepath.Join(baseDir, fmt.Sprintf("unrealircd-fleet-%s", randomSuffix))
+
+		// Remove existing source directory if it exists
+		os.RemoveAll(sourceDir)
+
+		// Extract source once
+		app.QueueUpdateDraw(func() {
+			progressModal.SetText(fmt.Sprintf("Creating test fleet...\n\nExtracting source to %s...", sourceDir))
+		})
+
+		err = extractTarGz(tempFile.Name(), sourceDir)
+		if err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("fleet_progress_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Error extracting source: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("fleet_extract_error_modal")
+					})
+				pages.AddPage("fleet_extract_error_modal", errorModal, true, true)
+			})
+			return
+		}
 
 		for i := 1; i <= numServers; i++ {
 			app.QueueUpdateDraw(func() {
 				progressModal.SetText(fmt.Sprintf("Creating test fleet...\n\nSetting up server %d of %d...", i, numServers))
 			})
 
-			// Create directory for this server
-			serverDir := filepath.Join(baseDir, fmt.Sprintf("unrealircd-fleet-%d", i))
-			buildDir := filepath.Join(baseDir, fmt.Sprintf("unrealircd-fleet-build-%d", i))
+			// Create build directory for this server with suffix + number
+			buildDir := filepath.Join(baseDir, fmt.Sprintf("unrealircd-fleet-%s-%d", randomSuffix, i))
 
-			// Remove existing directories if they exist
-			os.RemoveAll(serverDir)
+			// Remove existing build directory if it exists
 			os.RemoveAll(buildDir)
 
-			// Extract source
-			err = extractTarGz(tempFile.Name(), serverDir)
-			if err != nil {
-				app.QueueUpdateDraw(func() {
-					pages.RemovePage("fleet_progress_modal")
-					errorModal := tview.NewModal().
-						SetText(fmt.Sprintf("Error extracting source for server %d: %v", i, err)).
-						AddButtons([]string{"OK"}).
-						SetDoneFunc(func(int, string) {
-							pages.RemovePage("fleet_extract_error_modal")
-						})
-					pages.AddPage("fleet_extract_error_modal", errorModal, true, true)
-				})
-				return
-			}
-
 			// Configure this server
-			err = configureFleetServer(serverDir, buildDir, i, numServers, stableVersion)
+			err = configureFleetServer(sourceDir, buildDir, i, numServers, stableVersion)
 			if err != nil {
 				app.QueueUpdateDraw(func() {
 					pages.RemovePage("fleet_progress_modal")
@@ -3324,7 +3339,7 @@ func createTestFleet(app *tview.Application, pages *tview.Pages, numServers int)
 		app.QueueUpdateDraw(func() {
 			pages.RemovePage("fleet_progress_modal")
 			successModal := tview.NewModal().
-				SetText(fmt.Sprintf("Test fleet created successfully!\n\nCreated %d UnrealIRCd servers in spanning tree topology.\n\nServer directories: ~/unrealircd-fleet-1 through ~/unrealircd-fleet-%d\nBuild directories: ~/unrealircd-fleet-build-1 through ~/unrealircd-fleet-build-%d", numServers, numServers, numServers)).
+				SetText(fmt.Sprintf("Test fleet created successfully!\n\nCreated %d UnrealIRCd servers in spanning tree topology.\n\nSource directory: ~/unrealircd-fleet-%s\nBuild directories: ~/unrealircd-fleet-%s-1 through ~/unrealircd-fleet-%s-%d", numServers, randomSuffix, randomSuffix, randomSuffix, numServers)).
 				AddButtons([]string{"OK"}).
 				SetDoneFunc(func(int, string) {
 					pages.RemovePage("fleet_success_modal")
@@ -3344,7 +3359,7 @@ func configureFleetServer(sourceDir, buildDir string, serverIndex, totalServers 
 	}
 
 	// Run ./configure
-	cmd := exec.Command("./configure", "--with-bindir="+buildDir+"/bin", "--with-datadir="+buildDir+"/data", "--with-logdir="+buildDir+"/logs", "--with-modulesdir="+buildDir+"/modules", "--with-confdir="+buildDir+"/conf", "--with-pidfile="+buildDir+"/ircd.pid", "--with-tmpdir="+buildDir+"/tmp", "--with-scriptdir="+buildDir+"/scripts", "--with-cachedir="+buildDir+"/cache")
+	cmd := exec.Command("./Config", "-quick")
 	cmd.Dir = sourceDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
