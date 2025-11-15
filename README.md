@@ -84,10 +84,8 @@ When you first run the tool, it will:
 
 To use remote control features:
 
-1. Ensure your UnrealIRCd server has RPC enabled in `unrealircd.conf`:
-   
-See the docs on how to do this: https://www.unrealircd.org/docs/JSON-RPC
-
+1. Ensure your UnrealIRCd server has RPC enabled in `unrealircd.conf`. See the docs on how to do this: https://www.unrealircd.org/docs/JSON-RPC
+2. Rehash
 3. In the tool, select "Remote Control" and configure:
    - WebSocket URL (default: `wss://127.0.0.1:8600/`)
    - RPC username and password
