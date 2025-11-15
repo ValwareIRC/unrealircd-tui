@@ -45,7 +45,7 @@ func (r *RPCClient) Close() error {
 func (r *RPCClient) GetUsers() ([]UserInfo, error) {
 	debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	defer debugFile.Close()
-	
+
 	// Try detail level 0 to see if it returns strings
 	usersData, err := r.conn.User().GetAll(0) // Detail level 0
 	if err != nil {
@@ -109,7 +109,7 @@ func (r *RPCClient) GetUsers() ([]UserInfo, error) {
 func (r *RPCClient) GetChannels() ([]ChannelInfo, error) {
 	debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	defer debugFile.Close()
-	
+
 	// Try detail level 1 to get basic channel info for the list
 	channelsData, err := r.conn.Channel().GetAll(1)
 	if err != nil {
@@ -133,9 +133,9 @@ func (r *RPCClient) GetChannels() ([]ChannelInfo, error) {
 			fmt.Fprintf(debugFile, "DEBUG RPC: item %d type: %T\n", i, ch)
 			if channelMap, ok := ch.(map[string]interface{}); ok {
 				fmt.Fprintf(debugFile, "DEBUG RPC: parsing channelMap with keys: %v\n", getKeys(channelMap))
-				
+
 				channel := ChannelInfo{}
-				
+
 				if name, ok := channelMap["name"].(string); ok {
 					channel.Name = name
 				}
@@ -184,7 +184,7 @@ func (r *RPCClient) GetChannels() ([]ChannelInfo, error) {
 				if !usersFound {
 					fmt.Fprintf(debugFile, "DEBUG RPC: no users key found in channelMap\n")
 				}
-				
+
 				channels = append(channels, channel)
 			} else if channelName, ok := ch.(string); ok {
 				fmt.Fprintf(debugFile, "DEBUG RPC: got channel name string: %s\n", channelName)
@@ -205,28 +205,28 @@ func (r *RPCClient) GetChannels() ([]ChannelInfo, error) {
 func (r *RPCClient) GetChannelDetails(channelName string) (*ChannelInfo, error) {
 	debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	defer debugFile.Close()
-	
+
 	fmt.Fprintf(debugFile, "DEBUG: GetChannelDetails called for channel: %s\n", channelName)
-	
+
 	channelData, err := r.conn.Channel().Get(channelName, 4)
 	if err != nil {
 		fmt.Fprintf(debugFile, "DEBUG: Channel().Get failed for %s: %v\n", channelName, err)
 		return nil, fmt.Errorf("failed to get channel details for %s: %w", channelName, err)
 	}
-	
+
 	fmt.Fprintf(debugFile, "DEBUG: Channel().Get returned type %T\n", channelData)
-	
+
 	if channelMap, ok := channelData.(map[string]interface{}); ok {
 		fmt.Fprintf(debugFile, "DEBUG: parsing channelMap with keys: %v\n", getKeys(channelMap))
-		
+
 		// The actual channel data might be under "channel" key
 		if channelData, ok := channelMap["channel"].(map[string]interface{}); ok {
 			fmt.Fprintf(debugFile, "DEBUG: parsing channel data with keys: %v\n", getKeys(channelData))
 			channelMap = channelData
 		}
-		
+
 		channel := &ChannelInfo{}
-		
+
 		if name, ok := channelMap["name"].(string); ok {
 			channel.Name = name
 		}
@@ -242,7 +242,7 @@ func (r *RPCClient) GetChannelDetails(channelName string) (*ChannelInfo, error) 
 		if created, ok := channelMap["created"].(float64); ok {
 			channel.Created = int64(created)
 		}
-		
+
 		// Extract users list with detailed info - try different possible keys
 		usersFound := false
 		for _, key := range []string{"users", "members", "occupants", "nicks", "userlist"} {
@@ -255,7 +255,7 @@ func (r *RPCClient) GetChannelDetails(channelName string) (*ChannelInfo, error) 
 						if userMap, ok := user.(map[string]interface{}); ok {
 							// Parse detailed user info
 							userInfo := ""
-							
+
 							// Get user level/prefix
 							prefix := ""
 							if level, ok := userMap["level"].(string); ok {
@@ -271,7 +271,7 @@ func (r *RPCClient) GetChannelDetails(channelName string) (*ChannelInfo, error) 
 									prefix = "+"
 								}
 							}
-							
+
 							// Get nickname
 							nick := ""
 							if nickVal, ok := userMap["nick"].(string); ok {
@@ -279,7 +279,7 @@ func (r *RPCClient) GetChannelDetails(channelName string) (*ChannelInfo, error) 
 							} else if nameVal, ok := userMap["name"].(string); ok {
 								nick = nameVal
 							}
-							
+
 							// Get username and host
 							userHost := ""
 							if username, ok := userMap["username"].(string); ok && username != "" {
@@ -289,13 +289,13 @@ func (r *RPCClient) GetChannelDetails(channelName string) (*ChannelInfo, error) 
 									userHost = fmt.Sprintf(" (%s@%s)", username, ip)
 								}
 							}
-							
+
 							// Get channel count
 							channelCount := ""
 							if channels, ok := userMap["channels"].(float64); ok {
 								channelCount = fmt.Sprintf(" [%d channel(s)]", int(channels))
 							}
-							
+
 							userInfo = fmt.Sprintf("%s%s%s%s", prefix, nick, userHost, channelCount)
 							if userInfo != "" {
 								channel.Users = append(channel.Users, userInfo)
@@ -317,10 +317,10 @@ func (r *RPCClient) GetChannelDetails(channelName string) (*ChannelInfo, error) 
 		if !usersFound {
 			fmt.Fprintf(debugFile, "DEBUG RPC: no users key found in channelMap\n")
 		}
-		
+
 		return channel, nil
 	}
-	
+
 	return nil, fmt.Errorf("unexpected response format: %T", channelData)
 }
 
@@ -335,26 +335,26 @@ func getKeys(m map[string]interface{}) []string {
 func (r *RPCClient) GetUserDetails(nick string) (*UserInfo, error) {
 	debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	defer debugFile.Close()
-	
+
 	fmt.Fprintf(debugFile, "DEBUG: GetUserDetails called for nick: %s\n", nick)
-	
+
 	userData, err := r.conn.User().Get(nick, 4)
 	if err != nil {
 		fmt.Fprintf(debugFile, "DEBUG: User().Get failed for %s: %v\n", nick, err)
 		return nil, fmt.Errorf("failed to get user details for %s: %w", nick, err)
 	}
-	
+
 	fmt.Fprintf(debugFile, "DEBUG: User().Get returned type %T\n", userData)
-	
+
 	if userMap, ok := userData.(map[string]interface{}); ok {
 		fmt.Fprintf(debugFile, "DEBUG: parsing userMap with keys: %v\n", getKeys(userMap))
-		
+
 		user := &UserInfo{}
-		
+
 		// The actual user data is under "user" key
 		if userData, ok := userMap["user"].(map[string]interface{}); ok {
 			fmt.Fprintf(debugFile, "DEBUG: parsing user data with keys: %v\n", getKeys(userData))
-			
+
 			if name, ok := userMap["name"].(string); ok { // name is at top level
 				user.Name = name
 				user.Nick = name
@@ -419,7 +419,7 @@ func (r *RPCClient) GetUserDetails(nick string) (*UserInfo, error) {
 			if ip, ok := userMap["ip"].(string); ok {
 				user.IP = ip
 			}
-			
+
 			// Extract channels
 			if channelsData, ok := userMap["channels"].([]interface{}); ok {
 				for _, ch := range channelsData {
@@ -429,7 +429,7 @@ func (r *RPCClient) GetUserDetails(nick string) (*UserInfo, error) {
 				}
 			}
 		}
-		
+
 		fmt.Fprintf(debugFile, "DEBUG: parsed user: %+v\n", user)
 		return user, nil
 	} else {
@@ -457,14 +457,14 @@ func (r *RPCClient) GetLogEvent() (*LogEntry, error) {
 		event interface{}
 		err   error
 	}
-	
+
 	resultChan := make(chan result, 1)
-	
+
 	go func() {
 		event, err := r.conn.EventLoop()
 		resultChan <- result{event: event, err: err}
 	}()
-	
+
 	// Wait for event or timeout after 5 seconds
 	select {
 	case res := <-resultChan:
@@ -479,24 +479,24 @@ func (r *RPCClient) GetLogEvent() (*LogEntry, error) {
 			}
 			return nil, res.err
 		}
-		
-	// Handle nil events gracefully
+
+		// Handle nil events gracefully
 		if res.event == nil {
 			debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 			fmt.Fprintf(debugFile, "DEBUG: Received nil event, continuing to poll\n")
 			debugFile.Close()
 			return nil, nil
 		}
-		
+
 		// Log raw event data for debugging
 		debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		fmt.Fprintf(debugFile, "DEBUG: Raw event received: %+v\n", res.event)
 		debugFile.Close()
-		
+
 		// Parse the event data
 		if eventMap, ok := res.event.(map[string]interface{}); ok {
 			entry := &LogEntry{}
-			
+
 			if timeVal, ok := eventMap["time"].(float64); ok {
 				entry.Time = int64(timeVal)
 			}
@@ -509,14 +509,14 @@ func (r *RPCClient) GetLogEvent() (*LogEntry, error) {
 			if message, ok := eventMap["message"].(string); ok {
 				entry.Message = message
 			}
-			
+
 			if entry.Time != 0 || entry.Level != "" || entry.Source != "" || entry.Message != "" {
 				return entry, nil
 			}
 		}
-		
+
 		return nil, nil // No valid log event
-		
+
 	case <-time.After(5 * time.Second):
 		// Timeout - no events available
 		return nil, nil
@@ -526,17 +526,17 @@ func (r *RPCClient) GetLogEvent() (*LogEntry, error) {
 // TailLogFile starts tailing the JSON log file and returns a channel of parsed log entries
 func (r *RPCClient) TailLogFile(buildDir string, sources []string) (<-chan *FileLogEntry, error) {
 	logFilePath := filepath.Join(buildDir, "logs", "ircd.json.log")
-	
+
 	// Check if log file exists
 	if _, err := os.Stat(logFilePath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("log file does not exist: %s", logFilePath)
 	}
-	
+
 	logChan := make(chan *FileLogEntry, 100)
-	
+
 	go func() {
 		defer close(logChan)
-		
+
 		// First, read existing logs from the file and filter by sources
 		if len(sources) > 0 {
 			file, err := os.Open(logFilePath)
@@ -546,31 +546,31 @@ func (r *RPCClient) TailLogFile(buildDir string, sources []string) (<-chan *File
 				debugFile.Close()
 			} else {
 				defer file.Close()
-				
+
 				scanner := bufio.NewScanner(file)
 				var historicLogs []*FileLogEntry
-				
+
 				for scanner.Scan() {
 					line := strings.TrimSpace(scanner.Text())
 					if line == "" {
 						continue
 					}
-					
+
 					// First parse into a map to get all fields
 					var rawData map[string]interface{}
 					if err := json.Unmarshal([]byte(line), &rawData); err != nil {
 						continue // Skip invalid lines
 					}
-					
+
 					// Then parse into FileLogEntry struct
 					var entry FileLogEntry
 					if err := json.Unmarshal([]byte(line), &entry); err != nil {
 						continue // Skip invalid lines
 					}
-					
+
 					// Store the raw JSON
 					entry.RawJSON = line
-					
+
 					// Filter by selected sources
 					sourceMatch := false
 					for _, source := range sources {
@@ -579,23 +579,23 @@ func (r *RPCClient) TailLogFile(buildDir string, sources []string) (<-chan *File
 							break
 						}
 					}
-					
+
 					if sourceMatch {
 						historicLogs = append(historicLogs, &entry)
 					}
 				}
-				
+
 				if err := scanner.Err(); err != nil {
 					debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 					fmt.Fprintf(debugFile, "[DEBUG] Scanner error reading historic logs: %v\n", err)
 					debugFile.Close()
 				}
-				
+
 				// Reverse historicLogs so oldest logs come first
 				for i, j := 0, len(historicLogs)-1; i < j; i, j = i+1, j-1 {
 					historicLogs[i], historicLogs[j] = historicLogs[j], historicLogs[i]
 				}
-				
+
 				// Send all historic logs at once (now in chronological order: oldest first)
 				for _, entry := range historicLogs {
 					select {
@@ -604,13 +604,13 @@ func (r *RPCClient) TailLogFile(buildDir string, sources []string) (<-chan *File
 						// Channel is full, skip this entry
 					}
 				}
-				
+
 				debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 				fmt.Fprintf(debugFile, "[DEBUG] Finished reading %d historic logs\n", len(historicLogs))
 				debugFile.Close()
 			}
 		}
-		
+
 		// Now start tail -f for new logs
 		cmd := exec.Command("tail", "-f", "-n", "0", logFilePath)
 		stdout, err := cmd.StdoutPipe()
@@ -620,25 +620,25 @@ func (r *RPCClient) TailLogFile(buildDir string, sources []string) (<-chan *File
 			debugFile.Close()
 			return
 		}
-		
+
 		if err := cmd.Start(); err != nil {
 			debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 			fmt.Fprintf(debugFile, "[DEBUG] Failed to start tail command: %v\n", err)
 			debugFile.Close()
 			return
 		}
-		
+
 		debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		fmt.Fprintf(debugFile, "[DEBUG] Started tailing log file: %s\n", logFilePath)
 		debugFile.Close()
-		
+
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
 				continue
 			}
-			
+
 			var entry FileLogEntry
 			if err := json.Unmarshal([]byte(line), &entry); err != nil {
 				debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -646,10 +646,10 @@ func (r *RPCClient) TailLogFile(buildDir string, sources []string) (<-chan *File
 				debugFile.Close()
 				continue
 			}
-			
+
 			// Store the raw JSON
 			entry.RawJSON = line
-			
+
 			// Filter by selected sources (for new logs too)
 			if len(sources) > 0 && sources[0] != "*" {
 				sourceMatch := false
@@ -663,7 +663,7 @@ func (r *RPCClient) TailLogFile(buildDir string, sources []string) (<-chan *File
 					continue
 				}
 			}
-			
+
 			select {
 			case logChan <- &entry:
 			default:
@@ -673,16 +673,16 @@ func (r *RPCClient) TailLogFile(buildDir string, sources []string) (<-chan *File
 				debugFile.Close()
 			}
 		}
-		
+
 		if err := scanner.Err(); err != nil {
 			debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 			fmt.Fprintf(debugFile, "[DEBUG] Scanner error: %v\n", err)
 			debugFile.Close()
 		}
-		
+
 		// Wait for command to finish
 		cmd.Wait()
 	}()
-	
+
 	return logChan, nil
 }

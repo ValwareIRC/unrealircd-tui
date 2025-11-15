@@ -10,29 +10,29 @@ type ServerInfo struct {
 
 // User info
 type UserInfo struct {
-	Name            string   `json:"name"`
-	Nick            string   `json:"nick"`
-	Realname        string   `json:"realname"`
-	Account         string   `json:"account"`
-	IP              string   `json:"ip"`
-	Channels        []string `json:"channels"`
-	Username        string   `json:"username"`
-	Vhost           string   `json:"vhost"`
-	Cloakedhost     string   `json:"cloakedhost"`
-	Servername      string   `json:"servername"`
-	Reputation      int      `json:"reputation"`
-	Modes           string   `json:"modes"`
-	SecurityGroups  []string `json:"security-groups"`
+	Name           string   `json:"name"`
+	Nick           string   `json:"nick"`
+	Realname       string   `json:"realname"`
+	Account        string   `json:"account"`
+	IP             string   `json:"ip"`
+	Channels       []string `json:"channels"`
+	Username       string   `json:"username"`
+	Vhost          string   `json:"vhost"`
+	Cloakedhost    string   `json:"cloakedhost"`
+	Servername     string   `json:"servername"`
+	Reputation     int      `json:"reputation"`
+	Modes          string   `json:"modes"`
+	SecurityGroups []string `json:"security-groups"`
 }
 
 // Channel info
 type ChannelInfo struct {
-	Name    string   `json:"name"`
-	Topic   string   `json:"topic"`
-	Users   []string `json:"users"`
-	UserCount int    `json:"num_users"`
-	Modes   string   `json:"modes"`
-	Created int64    `json:"created"`
+	Name      string   `json:"name"`
+	Topic     string   `json:"topic"`
+	Users     []string `json:"users"`
+	UserCount int      `json:"num_users"`
+	Modes     string   `json:"modes"`
+	Created   int64    `json:"created"`
 }
 
 // Server ban info

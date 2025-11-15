@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"crypto/rand"
 	"encoding/hex"
@@ -600,6 +601,15 @@ func getBasePathFromConfig(sourceDir string) (string, error) {
 		return "", fmt.Errorf("BASEPATH not found in config.settings")
 	}
 	return matches[1], nil
+}
+
+func generateRandomHexString(length int) string {
+	bytes := make([]byte, length/2+1) // +1 to ensure we have enough bytes
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback if crypto/rand fails
+		return strings.Repeat("a", length)
+	}
+	return hex.EncodeToString(bytes)[:length]
 }
 
 func buildAndInstall(sourceDir string, updateFunc func(string)) error {
@@ -2372,7 +2382,7 @@ GEOIP="%s"
 DEFPERM="%s"
 SSLDIR="%s"
 REMOTEINC="%s"
-CURLDIR="/usr"
+CURLDIR=""
 NOOPEROVERRIDE=""
 OPEROVERRIDEVERIFY=""
 GENCERTIFICATE=""
@@ -2653,94 +2663,18 @@ func setupConfigFile(buildDir string) error {
 }
 
 func extractTarGz(tarGzPath, destDir string) error {
-	file, err := os.Open(tarGzPath)
+	// Ensure destination directory exists
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("creating destination directory: %w", err)
+	}
+
+	// Use system tar command for reliable extraction
+	cmd := exec.Command("tar", "-zxvf", tarGzPath, "-C", destDir)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	gzr, err := gzip.NewReader(file)
-	if err != nil {
-		return err
-	}
-	defer gzr.Close()
-
-	tr := tar.NewReader(gzr)
-
-	// First pass: find the top-level directory
-	var topLevelDir string
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-
-		if header.Typeflag == tar.TypeDir {
-			parts := strings.Split(strings.Trim(header.Name, "/"), "/")
-			if len(parts) > 0 && topLevelDir == "" {
-				topLevelDir = parts[0]
-			} else if len(parts) > 0 && parts[0] != topLevelDir {
-				// Multiple top-level directories, don't strip
-				topLevelDir = ""
-				break
-			}
-		}
+		return fmt.Errorf("tar extraction failed: %w\nOutput: %s", err, string(output))
 	}
 
-	// Reset the reader for second pass
-	file.Seek(0, 0)
-	gzr, err = gzip.NewReader(file)
-	if err != nil {
-		return err
-	}
-	defer gzr.Close()
-	tr = tar.NewReader(gzr)
-
-	// Second pass: extract files
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-
-		// Strip the top-level directory if it exists
-		targetName := header.Name
-		if topLevelDir != "" && strings.HasPrefix(targetName, topLevelDir+"/") {
-			targetName = strings.TrimPrefix(targetName, topLevelDir+"/")
-		}
-		if targetName == "" {
-			continue // Skip the top-level directory itself
-		}
-
-		target := filepath.Join(destDir, targetName)
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, os.FileMode(header.Mode)); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			dir := filepath.Dir(target)
-			if err := os.MkdirAll(dir, 0755); err != nil {
-				return err
-			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(f, tr); err != nil {
-				f.Close()
-				return err
-			}
-			f.Close()
-		}
-	}
 	return nil
 }
 
@@ -3063,12 +2997,23 @@ Features:
 • Link block generation and application
 • Spanning tree topology (not mesh)
 
-Create a test network of interconnected UnrealIRCd servers for testing purposes.`}
+Create a test network of interconnected UnrealIRCd servers for testing purposes.`,
+		"• Manage Fleet": `Start and stop test fleet servers.
+
+Features:
+• Scan for existing test fleets
+• Start/stop individual servers
+• Start/stop entire fleets
+• View server status
+• Monitor running processes
+
+Control your test fleet servers with ease.`}
 
 	list := tview.NewList()
 	list.SetBorder(true).SetBorderColor(tcell.ColorYellow)
 	list.SetTitle("Tests")
 	list.AddItem("• Test Fleet", "  Create a test fleet of linked UnrealIRCd servers", 0, nil)
+	list.AddItem("• Manage Fleet", "  Start and stop test fleet servers", 0, nil)
 
 	currentList = list
 
@@ -3087,6 +3032,8 @@ Create a test network of interconnected UnrealIRCd servers for testing purposes.
 			switch mainText {
 			case "• Test Fleet":
 				testFleetPage(app, pages)
+			case "• Manage Fleet":
+				manageFleetPage(app, pages)
 			}
 		}
 		lastClickIndex = index
@@ -3098,6 +3045,8 @@ Create a test network of interconnected UnrealIRCd servers for testing purposes.
 		switch mainText {
 		case "• Test Fleet":
 			testFleetPage(app, pages)
+		case "• Manage Fleet":
+			manageFleetPage(app, pages)
 		}
 	})
 
@@ -3117,10 +3066,16 @@ Create a test network of interconnected UnrealIRCd servers for testing purposes.
 
 	// Layout
 	flex := tview.NewFlex().SetDirection(tview.FlexRow)
-	browserFlex := tview.NewFlex().
+
+	// Top section: main menu and description
+	topFlex := tview.NewFlex().
 		AddItem(list, 40, 0, true).
 		AddItem(textView, 0, 1, false)
-	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
+
+	flex.AddItem(header, 3, 0, false).
+		AddItem(topFlex, 0, 1, true).
+		AddItem(buttonBar, 3, 0, false).
+		AddItem(createFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
 	pages.AddPage("tests_submenu", flex, true, true)
 	app.SetFocus(list)
 }
@@ -3131,35 +3086,32 @@ func testFleetPage(app *tview.Application, pages *tview.Pages) {
 	form.SetBorder(true).SetTitle("Test Fleet Setup")
 	form.SetBorderColor(tcell.ColorYellow)
 
-	// Add number input field
+	// Add number input field and buttons
 	form.AddInputField("Number of servers (2-50)", "2", 10, func(text string, ch rune) bool {
 		// Only allow digits
 		return (ch >= '0' && ch <= '9') || ch == 0
-	}, nil)
+	}, nil).
+		AddButton("Create Fleet", func() {
+			numStr := form.GetFormItem(0).(*tview.InputField).GetText()
+			numServers, err := strconv.Atoi(numStr)
+			if err != nil || numServers < 2 || numServers > 50 {
+				errorModal := tview.NewModal().
+					SetText("Please enter a valid number between 2 and 50.").
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("fleet_error_modal")
+					})
+				pages.AddPage("fleet_error_modal", errorModal, true, true)
+				return
+			}
 
-	// Add buttons
-	form.AddButton("Create Fleet", func() {
-		numStr := form.GetFormItem(0).(*tview.InputField).GetText()
-		numServers, err := strconv.Atoi(numStr)
-		if err != nil || numServers < 2 || numServers > 50 {
-			errorModal := tview.NewModal().
-				SetText("Please enter a valid number between 2 and 50.").
-				AddButtons([]string{"OK"}).
-				SetDoneFunc(func(int, string) {
-					pages.RemovePage("fleet_error_modal")
-				})
-			pages.AddPage("fleet_error_modal", errorModal, true, true)
-			return
-		}
-
-		// Start fleet creation process
-		createTestFleet(app, pages, numServers)
-	})
-
-	form.AddButton("Cancel", func() {
-		pages.RemovePage("test_fleet")
-		pages.SwitchToPage("tests_submenu")
-	})
+			// Start fleet creation process
+			createTestFleet(app, pages, numServers)
+		}).
+		AddButton("Cancel", func() {
+			pages.RemovePage("test_fleet")
+			pages.SwitchToPage("tests_submenu")
+		})
 
 	// Layout
 	flex := tview.NewFlex().SetDirection(tview.FlexRow)
@@ -3169,8 +3121,700 @@ func testFleetPage(app *tview.Application, pages *tview.Pages) {
 	flex.AddItem(tview.NewTextView(), 1, 0, false) // Spacer
 	flex.AddItem(createFooter("Enter: Select | Tab: Next Field | Esc: Cancel"), 3, 0, false)
 
-	pages.AddPage("test_fleet", flex, true, true)
+	centeredFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(tview.NewTextView(), 0, 1, false).
+		AddItem(flex, 100, 0, true).
+		AddItem(tview.NewTextView(), 0, 1, false)
+
+	pages.AddPage("test_fleet", centeredFlex, true, true)
 	app.SetFocus(form)
+}
+
+func manageFleetPage(app *tview.Application, pages *tview.Pages) {
+	// Remove any existing manage_fleet page to avoid conflicts
+	pages.RemovePage("manage_fleet")
+
+	// Scan for existing fleet directories
+	fleets, err := scanForFleets()
+	if err != nil {
+		errorModal := tview.NewModal().
+			SetText(fmt.Sprintf("Error scanning for fleets: %v", err)).
+			AddButtons([]string{"OK"}).
+			SetDoneFunc(func(int, string) {
+				pages.RemovePage("scan_fleets_error_modal")
+			})
+		pages.AddPage("scan_fleets_error_modal", errorModal, true, true)
+		return
+	}
+
+	if len(fleets) == 0 {
+		errorModal := tview.NewModal().
+			SetText("No test fleets found. Create a test fleet first.").
+			AddButtons([]string{"OK"}).
+			SetDoneFunc(func(int, string) {
+				pages.RemovePage("no_fleets_modal")
+				pages.RemovePage("manage_fleet")
+				pages.SwitchToPage("tests_submenu")
+			})
+		pages.AddPage("no_fleets_modal", errorModal, true, true)
+		return
+	}
+
+	// Create list of fleets
+	list := tview.NewList()
+	list.SetBorder(true).SetTitle("Select Fleet to Manage")
+	list.SetBorderColor(tcell.ColorGreen)
+
+	for _, fleet := range fleets {
+		displayName := fmt.Sprintf("Fleet %s (%d servers)", fleet.Suffix, fleet.ServerCount)
+		secondaryText := fmt.Sprintf("Source: %s | Servers: %s-1 to %s-%d", fleet.SourceDir, fleet.Suffix, fleet.Suffix, fleet.ServerCount)
+		list.AddItem(displayName, secondaryText, 0, nil)
+	}
+
+	list.SetSelectedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		selectedFleet := fleets[index]
+		showFleetControlPage(app, pages, selectedFleet)
+	})
+
+	deleteBtn := tview.NewButton("Delete Fleet").SetSelectedFunc(func() {
+		index := list.GetCurrentItem()
+		if index < 0 || index >= len(fleets) {
+			return
+		}
+		selectedFleet := fleets[index]
+		confirmModal := tview.NewModal().
+			SetText(fmt.Sprintf("Delete fleet '%s' (%d servers)?\n\nThis will permanently remove all fleet directories and cannot be undone!", selectedFleet.Suffix, selectedFleet.ServerCount)).
+			AddButtons([]string{"No", "Yes"}).
+			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+				if buttonLabel == "Yes" {
+					// Delete the fleet
+					err := deleteFleet(selectedFleet)
+					if err != nil {
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Error deleting fleet: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("error_modal")
+							})
+						pages.AddPage("error_modal", errorModal, true, true)
+					} else {
+						// Success - refresh the manage fleet page
+						manageFleetPage(app, pages)
+					}
+				}
+				pages.RemovePage("confirm_modal")
+			})
+		pages.AddPage("confirm_modal", confirmModal, true, true)
+	})
+
+	backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
+		pages.SwitchToPage("tests_submenu")
+	})
+
+	buttonBar := createButtonBar(deleteBtn, backBtn)
+
+	// Layout
+	contentFlex := tview.NewFlex().SetDirection(tview.FlexRow)
+	contentFlex.AddItem(createHeader(), 3, 0, false).AddItem(list, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("Enter: Select fleet | d: Delete Fleet | b: Back"), 3, 0, false)
+
+	centeredFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(tview.NewTextView(), 0, 1, false).
+		AddItem(contentFlex, 100, 0, true).
+		AddItem(tview.NewTextView(), 0, 1, false)
+
+	pages.AddPage("manage_fleet", centeredFlex, true, true)
+	app.SetFocus(list)
+}
+
+type FleetInfo struct {
+	Suffix      string
+	SourceDir   string
+	BuildDirs   []string
+	ServerCount int
+}
+
+func scanForFleets() ([]FleetInfo, error) {
+	usr, _ := user.Current()
+	baseDir := usr.HomeDir
+
+	// Find all directories matching the fleet pattern
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		return nil, err
+	}
+
+	fleetMap := make(map[string]*FleetInfo)
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		dirName := entry.Name()
+
+		// Check if it's a fleet source directory (unrealircd-fleet-{suffix})
+		if strings.HasPrefix(dirName, "unrealircd-fleet-") && strings.Count(dirName, "-") == 2 {
+			// This is "unrealircd-fleet-{suffix}", extract suffix
+			parts := strings.Split(dirName, "-")
+			if len(parts) >= 3 {
+				suffix := parts[2]
+				if fleetMap[suffix] == nil {
+					fleetMap[suffix] = &FleetInfo{
+						Suffix:    suffix,
+						SourceDir: filepath.Join(baseDir, dirName),
+						BuildDirs: []string{},
+					}
+				}
+			}
+		}
+
+		// Check if it's a fleet build directory (unrealircd-fleet-{suffix}-{number})
+		if strings.HasPrefix(dirName, "unrealircd-fleet-") && strings.Count(dirName, "-") == 3 {
+			parts := strings.Split(dirName, "-")
+			if len(parts) >= 4 {
+				suffix := parts[2]
+				serverNumStr := parts[3]
+				serverNum, err := strconv.Atoi(serverNumStr)
+				if err != nil {
+					continue
+				}
+
+				if fleetMap[suffix] == nil {
+					fleetMap[suffix] = &FleetInfo{
+						Suffix:    suffix,
+						SourceDir: filepath.Join(baseDir, "unrealircd-fleet-"+suffix),
+						BuildDirs: []string{},
+					}
+				}
+
+				fleetMap[suffix].BuildDirs = append(fleetMap[suffix].BuildDirs, filepath.Join(baseDir, dirName))
+				if serverNum > fleetMap[suffix].ServerCount {
+					fleetMap[suffix].ServerCount = serverNum
+				}
+			}
+		}
+	}
+
+	// Convert map to slice and validate fleets
+	var fleets []FleetInfo
+	for _, fleet := range fleetMap {
+		// Only include fleets that have both source and at least one build directory
+		if _, err := os.Stat(fleet.SourceDir); err == nil && len(fleet.BuildDirs) > 0 {
+			// Sort build directories by server number
+			sort.Slice(fleet.BuildDirs, func(i, j int) bool {
+				iNum := extractServerNumber(fleet.BuildDirs[i])
+				jNum := extractServerNumber(fleet.BuildDirs[j])
+				return iNum < jNum
+			})
+			fleets = append(fleets, *fleet)
+		}
+	}
+
+	return fleets, nil
+}
+
+func extractServerNumber(dirPath string) int {
+	parts := strings.Split(filepath.Base(dirPath), "-")
+	if len(parts) >= 4 {
+		if num, err := strconv.Atoi(parts[3]); err == nil {
+			return num
+		}
+	}
+	return 0
+}
+
+func deleteFleet(fleet FleetInfo) error {
+	// Delete source directory
+	if err := os.RemoveAll(fleet.SourceDir); err != nil {
+		return fmt.Errorf("failed to delete source directory %s: %v", fleet.SourceDir, err)
+	}
+
+	// Delete all build directories
+	for _, buildDir := range fleet.BuildDirs {
+		if err := os.RemoveAll(buildDir); err != nil {
+			return fmt.Errorf("failed to delete build directory %s: %v", buildDir, err)
+		}
+	}
+
+	return nil
+}
+
+func showFleetControlPage(app *tview.Application, pages *tview.Pages, fleet FleetInfo) {
+	flex := tview.NewFlex().SetDirection(tview.FlexRow)
+
+	// Title
+	title := tview.NewTextView().
+		SetText(fmt.Sprintf("Fleet Control - %s (%d servers)", fleet.Suffix, fleet.ServerCount)).
+		SetTextAlign(tview.AlignCenter).
+		SetDynamicColors(true)
+	title.SetBorder(true).SetTitle("Fleet Management")
+
+	// Server list
+	list := tview.NewList().
+		SetWrapAround(false).
+		SetHighlightFullLine(true)
+
+	// Add individual server controls
+	for i, buildDir := range fleet.BuildDirs {
+		serverNum := i + 1
+		serverName := fmt.Sprintf("Server %d", serverNum)
+		list.AddItem(serverName, fmt.Sprintf("Directory: %s", filepath.Base(buildDir)), rune('1'+i), func() {
+			showServerControlPage(app, pages, fleet, serverNum-1)
+		})
+	}
+
+	// Add bulk controls
+	list.AddItem("Start All Servers", "Start all servers in the fleet", 'a', func() {
+		startAllServers(app, pages, fleet)
+	})
+	list.AddItem("Stop All Servers", "Stop all servers in the fleet", 's', func() {
+		stopAllServers(app, pages, fleet)
+	})
+	list.AddItem("Check Status", "Check status of all servers", 'c', func() {
+		checkFleetStatus(app, pages, fleet)
+	})
+
+	// Delete fleet button
+	deleteBtn := tview.NewButton("Delete Fleet").SetSelectedFunc(func() {
+		confirmModal := tview.NewModal().
+			SetText(fmt.Sprintf("Delete fleet '%s' (%d servers)?\n\nThis will permanently remove all fleet directories and cannot be undone!", fleet.Suffix, fleet.ServerCount)).
+			AddButtons([]string{"No", "Yes"}).
+			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+				if buttonLabel == "Yes" {
+					// Delete the fleet
+					err := deleteFleet(fleet)
+					if err != nil {
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Error deleting fleet: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("error_modal")
+							})
+						pages.AddPage("error_modal", errorModal, true, true)
+					} else {
+						// Success - go back to tests submenu
+						pages.SwitchToPage("tests_submenu")
+					}
+				}
+				pages.RemovePage("confirm_modal")
+			})
+		pages.AddPage("confirm_modal", confirmModal, true, true)
+	})
+
+	// Back button
+	backBtn := tview.NewButton("Back to Fleet List").SetSelectedFunc(func() {
+		pages.SwitchToPage("tests_submenu")
+	})
+
+	buttonBar := createButtonBar(deleteBtn, backBtn)
+
+	flex.AddItem(title, 3, 1, false)
+	flex.AddItem(list, 0, 1, true)
+	flex.AddItem(buttonBar, 3, 1, false)
+
+	pages.AddPage(fmt.Sprintf("fleetControl-%s", fleet.Suffix), flex, true, true)
+	pages.SwitchToPage(fmt.Sprintf("fleetControl-%s", fleet.Suffix))
+}
+
+func showServerControlPage(app *tview.Application, pages *tview.Pages, fleet FleetInfo, serverIndex int) {
+	if serverIndex < 0 || serverIndex >= len(fleet.BuildDirs) {
+		return
+	}
+
+	buildDir := fleet.BuildDirs[serverIndex]
+	serverNum := serverIndex + 1
+
+	flex := tview.NewFlex().SetDirection(tview.FlexRow)
+
+	// Title
+	title := tview.NewTextView().
+		SetText(fmt.Sprintf("Server %d Control - Fleet %s", serverNum, fleet.Suffix)).
+		SetTextAlign(tview.AlignCenter).
+		SetDynamicColors(true)
+	title.SetBorder(true).SetTitle("Server Management")
+
+	// Server info
+	info := tview.NewTextView().
+		SetText(fmt.Sprintf("Directory: %s\nFleet: %s\nServer Number: %d", filepath.Base(buildDir), fleet.Suffix, serverNum)).
+		SetDynamicColors(true)
+	info.SetBorder(true).SetTitle("Server Info")
+
+	// Control buttons
+	btnFlex := tview.NewFlex().SetDirection(tview.FlexColumn)
+
+	startBtn := tview.NewButton("Start Server").SetSelectedFunc(func() {
+		startServer(app, pages, buildDir, fmt.Sprintf("fleet-%s-%d", fleet.Suffix, serverNum))
+	})
+
+	stopBtn := tview.NewButton("Stop Server").SetSelectedFunc(func() {
+		stopServer(app, pages, fmt.Sprintf("fleet-%s-%d", fleet.Suffix, serverNum))
+	})
+
+	statusBtn := tview.NewButton("Check Status").SetSelectedFunc(func() {
+		checkServerStatus(app, pages, buildDir, fmt.Sprintf("fleet-%s-%d", fleet.Suffix, serverNum))
+	})
+
+	backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
+		pages.SwitchToPage(fmt.Sprintf("fleetControl-%s", fleet.Suffix))
+	})
+
+	btnFlex.AddItem(startBtn, 0, 1, true)
+	btnFlex.AddItem(stopBtn, 0, 1, false)
+	btnFlex.AddItem(statusBtn, 0, 1, false)
+	btnFlex.AddItem(backBtn, 0, 1, false)
+
+	flex.AddItem(title, 3, 1, false)
+	flex.AddItem(info, 5, 1, false)
+	flex.AddItem(btnFlex, 3, 1, false)
+
+	pages.AddPage(fmt.Sprintf("serverControl-%s-%d", fleet.Suffix, serverNum), flex, true, true)
+	pages.SwitchToPage(fmt.Sprintf("serverControl-%s-%d", fleet.Suffix, serverNum))
+}
+
+func startAllServers(app *tview.Application, pages *tview.Pages, fleet FleetInfo) {
+	modal := tview.NewModal().
+		SetText(fmt.Sprintf("Starting all %d servers in fleet %s...\nBuildDirs: %v", fleet.ServerCount, fleet.Suffix, fleet.BuildDirs)).
+		AddButtons([]string{"OK"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			pages.RemovePage("startingAll")
+		})
+
+	pages.AddPage("startingAll", modal, true, true)
+
+	go func() {
+		for i, buildDir := range fleet.BuildDirs {
+			serverName := fmt.Sprintf("fleet-%s-%d", fleet.Suffix, i+1)
+			app.QueueUpdateDraw(func() {
+				modal.SetText(fmt.Sprintf("Starting server %d/%d: %s\nDir: %s", i+1, fleet.ServerCount, serverName, buildDir))
+			})
+			if err := startServerProcess(buildDir, serverName); err != nil {
+				app.QueueUpdateDraw(func() {
+					modal.SetText(fmt.Sprintf("Error starting server %d (%s): %v", i+1, serverName, err))
+				})
+				return
+			}
+		}
+		app.QueueUpdateDraw(func() {
+			modal.SetText(fmt.Sprintf("All %d servers in fleet %s started successfully!", fleet.ServerCount, fleet.Suffix))
+		})
+	}()
+}
+
+func stopAllServers(app *tview.Application, pages *tview.Pages, fleet FleetInfo) {
+	modal := tview.NewModal().
+		SetText(fmt.Sprintf("Stopping all %d servers in fleet %s...", fleet.ServerCount, fleet.Suffix)).
+		AddButtons([]string{"OK"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			pages.RemovePage("stoppingAll")
+		})
+
+	pages.AddPage("stoppingAll", modal, true, true)
+
+	go func() {
+		for i := range fleet.BuildDirs {
+			serverName := fmt.Sprintf("fleet-%s-%d", fleet.Suffix, i+1)
+			stopServerProcess(serverName)
+		}
+		app.QueueUpdateDraw(func() {
+			modal.SetText(fmt.Sprintf("All %d servers in fleet %s stopped!", fleet.ServerCount, fleet.Suffix))
+		})
+	}()
+}
+
+func checkFleetStatus(app *tview.Application, pages *tview.Pages, fleet FleetInfo) {
+	modal := tview.NewModal().
+		SetText("Checking fleet status...").
+		AddButtons([]string{"OK"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			pages.RemovePage("checkingStatus")
+		})
+
+	pages.AddPage("checkingStatus", modal, true, true)
+
+	go func() {
+		running := 0
+		total := len(fleet.BuildDirs)
+
+		for i, _ := range fleet.BuildDirs {
+			serverName := fmt.Sprintf("fleet-%s-%d", fleet.Suffix, i+1)
+			if isServerRunning(serverName) {
+				running++
+			}
+		}
+
+		app.QueueUpdateDraw(func() {
+			modal.SetText(fmt.Sprintf("Fleet %s: %d/%d servers running", fleet.Suffix, running, total))
+		})
+	}()
+}
+
+func startServer(app *tview.Application, pages *tview.Pages, buildDir, serverName string) {
+	modal := tview.NewModal().
+		SetText(fmt.Sprintf("Starting server %s...", serverName)).
+		AddButtons([]string{"OK"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			pages.RemovePage("startingServer")
+		})
+
+	pages.AddPage("startingServer", modal, true, true)
+
+	go func() {
+		if err := startServerProcess(buildDir, serverName); err != nil {
+			app.QueueUpdateDraw(func() {
+				modal.SetText(fmt.Sprintf("Error starting server: %v", err))
+			})
+		} else {
+			app.QueueUpdateDraw(func() {
+				modal.SetText(fmt.Sprintf("Server %s started successfully!", serverName))
+			})
+		}
+	}()
+}
+
+func stopServer(app *tview.Application, pages *tview.Pages, serverName string) {
+	modal := tview.NewModal().
+		SetText(fmt.Sprintf("Stopping server %s...", serverName)).
+		AddButtons([]string{"OK"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			pages.RemovePage("stoppingServer")
+		})
+
+	pages.AddPage("stoppingServer", modal, true, true)
+
+	go func() {
+		stopServerProcess(serverName)
+		app.QueueUpdateDraw(func() {
+			modal.SetText(fmt.Sprintf("Server %s stopped!", serverName))
+		})
+	}()
+}
+
+func checkServerStatus(app *tview.Application, pages *tview.Pages, buildDir, serverName string) {
+	modal := tview.NewModal().
+		SetText(fmt.Sprintf("Checking status of %s...", serverName)).
+		AddButtons([]string{"OK"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			pages.RemovePage("checkingServer")
+		})
+
+	pages.AddPage("checkingServer", modal, true, true)
+
+	go func() {
+		running := isServerRunning(serverName)
+		status := "stopped"
+		if running {
+			status = "running"
+		}
+		app.QueueUpdateDraw(func() {
+			modal.SetText(fmt.Sprintf("Server %s is %s", serverName, status))
+		})
+	}()
+}
+
+func startServerProcess(buildDir, serverName string) error {
+	// Check if already running
+	if isServerRunning(serverName) {
+		return fmt.Errorf("server %s is already running", serverName)
+	}
+
+	// Check if binary exists
+	binaryPath := filepath.Join(buildDir, "unrealircd")
+	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
+		return fmt.Errorf("unrealircd binary not found at %s", binaryPath)
+	}
+
+	// Check if config exists
+	configPath := filepath.Join(buildDir, "conf", "unrealircd.conf")
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return fmt.Errorf("config file not found at %s", configPath)
+	}
+
+	// Start the server process
+	cmd := exec.Command("./unrealircd", "start")
+	cmd.Dir = buildDir
+
+	// Capture output for debugging
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start process: %v", err)
+	}
+
+	// Wait a moment to see if it stays running
+	time.Sleep(2 * time.Second)
+
+	if cmd.Process == nil || cmd.ProcessState != nil {
+		return fmt.Errorf("process exited immediately. stdout: %s, stderr: %s", stdout.String(), stderr.String())
+	}
+
+	// Store the process info (simplified - in real implementation you'd want to track PIDs)
+	// For now, we'll just let it run in background
+	go func() {
+		cmd.Wait()
+	}()
+
+	return nil
+}
+
+func stopServerProcess(serverName string) {
+	// Find and kill the process
+	cmd := exec.Command("pkill", "-f", serverName)
+	cmd.Run() // Ignore errors - process might not exist
+}
+
+func isServerRunning(serverName string) bool {
+	cmd := exec.Command("pgrep", "-f", serverName)
+	return cmd.Run() == nil
+}
+
+func randomString(n int) string {
+	letters := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+	b := make([]byte, n)
+	_, err := rand.Read(b)
+	if err != nil {
+		return ""
+	}
+
+	for i := 0; i < n; i++ {
+		b[i] = letters[int(b[i])%len(letters)]
+	}
+	return string(b)
+}
+
+func generateSequentialSID(index int) string {
+	// Start from 001 and go sequentially
+	// 001-999, then 0AA-0ZZ, then 100-999, 1AA-1ZZ, etc.
+	
+	if index <= 999 {
+		return fmt.Sprintf("%03d", index)
+	}
+	
+	// For indices > 999, use base-36 encoding with a prefix
+	// 1000 = 0AA, 1001 = 0AB, etc.
+	adjustedIndex := index - 1000
+	
+	// Calculate the prefix (0-9) and suffix (AA-ZZ)
+	prefix := adjustedIndex / 676  // 26*26 = 676
+	suffixIndex := adjustedIndex % 676
+	
+	suffix1 := 'A' + rune(suffixIndex/26)
+	suffix2 := 'A' + rune(suffixIndex%26)
+	
+	return fmt.Sprintf("%d%c%c", prefix, suffix1, suffix2)
+}
+
+func modifyFleetServerConfig(exampleContent, suffix string, serverIndex, totalServers int) string {
+	serverName := fmt.Sprintf("fleet-%s-%d", suffix, serverIndex)
+	// just so it doesn't get in the way
+	port := 16667 + serverIndex - 1
+	sslPort := 26697 + serverIndex - 1
+	serverPort := 36900 + serverIndex - 1
+
+	// Replace key configuration values
+	content := exampleContent
+
+	// Replace server name (look for CHANGE THIS or default values)
+	content = strings.ReplaceAll(content, "irc.example.org", fmt.Sprintf("%s.test", serverName))
+	content = strings.ReplaceAll(content, "ExampleNet", "TestFleet")
+	content = strings.ReplaceAll(content, "Example IRC Server", fmt.Sprintf("Test IRC Server %d", serverIndex))
+
+	// Replace port (look for default port 6667)
+	content = strings.ReplaceAll(content, "port 6667;", fmt.Sprintf("port %d;", port))
+	content = strings.ReplaceAll(content, "port 6697;", fmt.Sprintf("port %d;", sslPort))
+	content = strings.ReplaceAll(content, "port 6900;", fmt.Sprintf("port %d;", serverPort))
+
+	// Replace SID (look for default 001)
+	content = strings.ReplaceAll(content, "sid \"001\";", fmt.Sprintf("sid \"%s\";", generateSequentialSID(serverIndex)))
+
+	// Replace email
+	content = strings.ReplaceAll(content, "set.this.to.email.address", "fake@email.com")
+
+	// Oper block shit
+	content = strings.ReplaceAll(content, "bobsmith", "testoper")
+	content = strings.ReplaceAll(content, "$argon2id..etc..", "passwordlol")
+
+	content = strings.Replace(content, "and another one", randomString(80), 1)
+	content = strings.Replace(content, "and another one", randomString(80), 1)
+
+	// Add a comment at the top indicating this is a test fleet config
+	headerComment := fmt.Sprintf("// Test fleet server configuration - %s\n// Auto-generated for server %d of %d\n\n", serverName, serverIndex, totalServers)
+	content = headerComment + content
+
+	return content
+}
+
+func generateFleetLinkBlocks(suffix string, numServers int, homeDir string, updateOutput func(string)) error {
+	for i := 1; i <= numServers; i++ {
+		buildDir := filepath.Join(homeDir, fmt.Sprintf("unrealircd-fleet-%s-%d", suffix, i))
+
+		updateOutput(fmt.Sprintf("Generating link block for server %d...", i))
+
+		// Run genlinkblock command
+		cmd := exec.Command("./unrealircd", "genlinkblock")
+		cmd.Dir = buildDir
+
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to generate link block for server %d: %v\nOutput: %s", i, err, string(output))
+		}
+
+		// Extract link block from output (between the hash lines)
+		outputStr := string(output)
+		startMarker := "################################################################################"
+		startIdx := strings.Index(outputStr, startMarker)
+		if startIdx == -1 {
+			return fmt.Errorf("could not find start marker in genlinkblock output for server %d", i)
+		}
+
+		// Find the second occurrence of the marker (end of link block)
+		endIdx := strings.Index(outputStr[startIdx+len(startMarker):], startMarker)
+		if endIdx == -1 {
+			return fmt.Errorf("could not find end marker in genlinkblock output for server %d", i)
+		}
+		endIdx += startIdx + len(startMarker) + len(startMarker)
+
+		linkBlock := outputStr[startIdx:endIdx]
+		outgoing := fmt.Sprintf("fleet-%s-%d.test;", suffix, i)
+		linkBlock = strings.ReplaceAll(linkBlock, outgoing, "127.0.0.1;")
+		linkBlock = strings.ReplaceAll(linkBlock, "#", "")
+
+		// Add link block to neighboring servers
+		// For server i, add to server i-1 and i+1 if they exist
+		neighbors := []int{}
+		if i > 1 {
+			neighbors = append(neighbors, i-1)
+		}
+		if i < numServers {
+			neighbors = append(neighbors, i+1)
+		}
+
+		for _, neighbor := range neighbors {
+			neighborBuildDir := filepath.Join(homeDir, fmt.Sprintf("unrealircd-fleet-%s-%d", suffix, neighbor))
+			configPath := filepath.Join(neighborBuildDir, "conf", "unrealircd.conf")
+
+			// Read existing config
+			configContent, err := os.ReadFile(configPath)
+			if err != nil {
+				return fmt.Errorf("failed to read config for server %d: %v", neighbor, err)
+			}
+
+			// Append link block
+			newContent := string(configContent) + "\n" + linkBlock + "\n"
+
+			// Write back
+			if err := os.WriteFile(configPath, []byte(newContent), 0644); err != nil {
+				return fmt.Errorf("failed to write config for server %d: %v", neighbor, err)
+			}
+
+			updateOutput(fmt.Sprintf("Added link block from server %d to server %d", i, neighbor))
+		}
+	}
+
+	return nil
 }
 
 func createTestFleet(app *tview.Application, pages *tview.Pages, numServers int) {
@@ -3240,28 +3884,64 @@ func createTestFleet(app *tview.Application, pages *tview.Pages, numServers int)
 				break
 			}
 		}
-		if stableVersion == "" || downloadURL == "" {
+
+		if stableVersion == "" {
 			app.QueueUpdateDraw(func() {
 				pages.RemovePage("fleet_progress_modal")
 				errorModal := tview.NewModal().
-					SetText("No stable version found in update info.").
+					SetText("Could not find stable version").
 					AddButtons([]string{"OK"}).
 					SetDoneFunc(func(int, string) {
-						pages.RemovePage("fleet_no_stable_modal")
+						pages.RemovePage("fleet_stable_error_modal")
 					})
-				pages.AddPage("fleet_no_stable_modal", errorModal, true, true)
+				pages.AddPage("fleet_stable_error_modal", errorModal, true, true)
 			})
 			return
 		}
-		updateOutput(fmt.Sprintf("Found UnrealIRCd %s", stableVersion))
 
-		// Generate random suffix
-		randomBytes := make([]byte, 4)
-		rand.Read(randomBytes)
-		randomSuffix := hex.EncodeToString(randomBytes)[:8]
+		updateOutput(fmt.Sprintf("Found stable version: %s", stableVersion))
 
-		// Download the source
-		updateOutput("Downloading source...")
+		// Generate random suffix for this fleet
+		suffixBytes := make([]byte, 4)
+		if _, err := rand.Read(suffixBytes); err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("fleet_progress_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Error generating random suffix: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("fleet_suffix_error_modal")
+					})
+				pages.AddPage("fleet_suffix_error_modal", errorModal, true, true)
+			})
+			return
+		}
+		suffix := hex.EncodeToString(suffixBytes)[:8]
+
+		updateOutput(fmt.Sprintf("Using fleet suffix: %s", suffix))
+
+		// Create source directory
+		usr, _ := user.Current()
+		sourceDir := filepath.Join(usr.HomeDir, fmt.Sprintf("unrealircd-fleet-%s", suffix))
+		updateOutput(fmt.Sprintf("Creating source directory: %s", sourceDir))
+
+		if err := os.MkdirAll(sourceDir, 0755); err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("fleet_progress_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Error creating source directory: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("fleet_source_error_modal")
+					})
+				pages.AddPage("fleet_source_error_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		// Download and extract source
+		downloadURL = fmt.Sprintf("https://www.unrealircd.org/downloads/unrealircd-%s.tar.gz", stableVersion)
+		updateOutput(fmt.Sprintf("Downloading from: %s", downloadURL))
 
 		resp, err = http.Get(downloadURL)
 		if err != nil {
@@ -3279,111 +3959,574 @@ func createTestFleet(app *tview.Application, pages *tview.Pages, numServers int)
 		}
 		defer resp.Body.Close()
 
-		// Create temp file for the downloaded archive
-		tempFile, err := os.CreateTemp("", "unrealircd-fleet-*.tar.gz")
+		// Extract tar.gz
+		gzr, err := gzip.NewReader(resp.Body)
 		if err != nil {
 			app.QueueUpdateDraw(func() {
 				pages.RemovePage("fleet_progress_modal")
 				errorModal := tview.NewModal().
-					SetText(fmt.Sprintf("Error creating temp file: %v", err)).
+					SetText(fmt.Sprintf("Error creating gzip reader: %v", err)).
 					AddButtons([]string{"OK"}).
 					SetDoneFunc(func(int, string) {
-						pages.RemovePage("fleet_temp_error_modal")
+						pages.RemovePage("fleet_gzip_error_modal")
 					})
-				pages.AddPage("fleet_temp_error_modal", errorModal, true, true)
+				pages.AddPage("fleet_gzip_error_modal", errorModal, true, true)
 			})
 			return
 		}
-		defer os.Remove(tempFile.Name())
-		defer tempFile.Close()
+		defer gzr.Close()
 
-		_, err = io.Copy(tempFile, resp.Body)
-		if err != nil {
-			app.QueueUpdateDraw(func() {
-				pages.RemovePage("fleet_progress_modal")
-				errorModal := tview.NewModal().
-					SetText(fmt.Sprintf("Error saving download: %v", err)).
-					AddButtons([]string{"OK"}).
-					SetDoneFunc(func(int, string) {
-						pages.RemovePage("fleet_save_error_modal")
-					})
-				pages.AddPage("fleet_save_error_modal", errorModal, true, true)
-			})
-			return
-		}
-		tempFile.Close()
-		updateOutput("Download complete")
-
-		// Now create each server in the fleet
-		usr, _ := user.Current()
-		baseDir := usr.HomeDir
-
-		// Create the shared source directory with random suffix
-		sourceDir := filepath.Join(baseDir, fmt.Sprintf("unrealircd-fleet-%s", randomSuffix))
-
-		// Remove existing source directory if it exists
-		os.RemoveAll(sourceDir)
-
-		// Extract source once
-		updateOutput(fmt.Sprintf("Extracting source to %s...", sourceDir))
-
-		err = extractTarGz(tempFile.Name(), sourceDir)
-		if err != nil {
-			app.QueueUpdateDraw(func() {
-				pages.RemovePage("fleet_progress_modal")
-				errorModal := tview.NewModal().
-					SetText(fmt.Sprintf("Error extracting source: %v", err)).
-					AddButtons([]string{"OK"}).
-					SetDoneFunc(func(int, string) {
-						pages.RemovePage("fleet_extract_error_modal")
-					})
-				pages.AddPage("fleet_extract_error_modal", errorModal, true, true)
-			})
-			return
-		}
-		updateOutput("Source extraction complete")
-
-		for i := 1; i <= numServers; i++ {
-			updateOutput(fmt.Sprintf("Setting up server %d of %d...", i, numServers))
-
-			// Create build directory for this server with suffix + number
-			buildDir := filepath.Join(baseDir, fmt.Sprintf("unrealircd-fleet-%s-%d", randomSuffix, i))
-
-			// Remove existing build directory if it exists
-			os.RemoveAll(buildDir)
-
-			// Configure this server
-			err = configureFleetServerWithOutput(sourceDir, buildDir, i, numServers, stableVersion, updateOutput)
+		tr := tar.NewReader(gzr)
+		for {
+			header, err := tr.Next()
+			if err == io.EOF {
+				break
+			}
 			if err != nil {
 				app.QueueUpdateDraw(func() {
 					pages.RemovePage("fleet_progress_modal")
 					errorModal := tview.NewModal().
-						SetText(fmt.Sprintf("Error configuring server %d: %v", i, err)).
+						SetText(fmt.Sprintf("Error reading tar: %v", err)).
 						AddButtons([]string{"OK"}).
 						SetDoneFunc(func(int, string) {
-							pages.RemovePage("fleet_config_error_modal")
+							pages.RemovePage("fleet_tar_error_modal")
 						})
-					pages.AddPage("fleet_config_error_modal", errorModal, true, true)
+					pages.AddPage("fleet_tar_error_modal", errorModal, true, true)
 				})
 				return
 			}
-			updateOutput(fmt.Sprintf("Server %d setup complete", i))
+
+			// Skip the top-level directory
+			if header.Typeflag == tar.TypeDir && strings.Contains(header.Name, "unrealircd-") {
+				continue
+			}
+
+			target := filepath.Join(sourceDir, strings.TrimPrefix(header.Name, fmt.Sprintf("unrealircd-%s/", stableVersion)))
+			if header.Typeflag == tar.TypeDir {
+				if err := os.MkdirAll(target, 0755); err != nil {
+					app.QueueUpdateDraw(func() {
+						pages.RemovePage("fleet_progress_modal")
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Error creating directory: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("fleet_mkdir_error_modal")
+							})
+						pages.AddPage("fleet_mkdir_error_modal", errorModal, true, true)
+					})
+					return
+				}
+			} else {
+				// Ensure parent directory exists
+				parentDir := filepath.Dir(target)
+				if err := os.MkdirAll(parentDir, 0755); err != nil {
+					app.QueueUpdateDraw(func() {
+						pages.RemovePage("fleet_progress_modal")
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Error creating parent directory: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("fleet_mkdir_error_modal")
+							})
+						pages.AddPage("fleet_mkdir_error_modal", errorModal, true, true)
+					})
+					return
+				}
+				f, err := os.Create(target)
+				if err != nil {
+					app.QueueUpdateDraw(func() {
+						pages.RemovePage("fleet_progress_modal")
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Error creating file: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("fleet_create_error_modal")
+							})
+						pages.AddPage("fleet_create_error_modal", errorModal, true, true)
+					})
+					return
+				}
+				if _, err := io.Copy(f, tr); err != nil {
+					f.Close()
+					app.QueueUpdateDraw(func() {
+						pages.RemovePage("fleet_progress_modal")
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Error writing file: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("fleet_write_error_modal")
+							})
+						pages.AddPage("fleet_write_error_modal", errorModal, true, true)
+					})
+					return
+				}
+				f.Close()
+			}
+		}
+
+		updateOutput("Source extracted successfully")
+
+		// Build each server individually with correct paths
+		for i := 1; i <= numServers; i++ {
+			// Create build directory for this server
+			buildDir := filepath.Join(usr.HomeDir, fmt.Sprintf("unrealircd-fleet-%s-%d", suffix, i))
+			if err := os.MkdirAll(buildDir, 0755); err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("fleet_progress_modal")
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Error creating build directory for server %d: %v", i, err)).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("fleet_build_dir_error_modal")
+						})
+					pages.AddPage("fleet_build_dir_error_modal", errorModal, true, true)
+				})
+				return
+			}
+
+			// Create config.settings for this server
+			err := saveConfigSettings(sourceDir, buildDir, "0600", "", "0", "2000", "classic", "auto", "", "")
+			if err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("fleet_progress_modal")
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Error saving config.settings for server %d: %v", i, err)).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("fleet_config_save_error_modal")
+						})
+					pages.AddPage("fleet_config_save_error_modal", errorModal, true, true)
+				})
+				return
+			}
+
+			// Make Config script executable
+			chmodCmd := exec.Command("chmod", "+x", "Config")
+			chmodCmd.Dir = sourceDir
+			if err := chmodCmd.Run(); err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("fleet_progress_modal")
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Failed to make Config executable for server %d: %v", i, err)).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("fleet_chmod_error_modal")
+						})
+					pages.AddPage("fleet_chmod_error_modal", errorModal, true, true)
+				})
+				return
+			}
+
+			// Make configure script executable
+			chmodConfigureCmd := exec.Command("chmod", "+x", "configure")
+			chmodConfigureCmd.Dir = sourceDir
+			if err := chmodConfigureCmd.Run(); err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("fleet_progress_modal")
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Failed to make configure executable for server %d: %v", i, err)).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("fleet_chmod_configure_error_modal")
+						})
+					pages.AddPage("fleet_chmod_configure_error_modal", errorModal, true, true)
+				})
+				return
+			}
+
+			// Run ./Config -quick
+			updateOutput(fmt.Sprintf("Configuring server %d of %d...", i, numServers))
+			configCmd := exec.Command("./Config", "-quick")
+			configCmd.Dir = sourceDir
+			if output, err := configCmd.CombinedOutput(); err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("fleet_progress_modal")
+
+					// Create a scrollable text view for the error output
+					errorTextView := tview.NewTextView().
+						SetText(fmt.Sprintf("Config failed for server %d: %v\n\nOutput:\n%s", i, err, string(output))).
+						SetDynamicColors(true).
+						SetWordWrap(true).
+						SetScrollable(true).
+						SetBorder(true).
+						SetTitle("Config Error Details")
+
+					// Create a flex layout with the text view and OK button
+					errorFlex := tview.NewFlex().SetDirection(tview.FlexRow).
+						AddItem(errorTextView, 0, 1, true).
+						AddItem(tview.NewButton("OK").SetSelectedFunc(func() {
+							pages.RemovePage("fleet_config_error_modal")
+						}), 1, 0, false)
+
+					pages.AddPage("fleet_config_error_modal", errorFlex, true, true)
+					app.SetFocus(errorTextView)
+				})
+				return
+			} else {
+				// Show config output on success
+				updateOutput(fmt.Sprintf("Config output for server %d:\n%s", i, string(output)))
+			}
+
+			// Make buildmod script executable
+			buildmodChmodCmd := exec.Command("chmod", "+x", "src/buildmod")
+			buildmodChmodCmd.Dir = sourceDir
+			if err := buildmodChmodCmd.Run(); err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("fleet_progress_modal")
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Failed to make buildmod executable for server %d: %v", i, err)).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("fleet_buildmod_chmod_error_modal")
+						})
+					pages.AddPage("fleet_buildmod_chmod_error_modal", errorModal, true, true)
+				})
+				return
+			}
+
+			updateOutput(fmt.Sprintf("Building server %d of %d...", i, numServers))
+
+			// Run make
+			makeCmd := exec.Command("make")
+			makeCmd.Dir = sourceDir
+			if output, err := makeCmd.CombinedOutput(); err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("fleet_progress_modal")
+
+					// Create a scrollable text view for the error output
+					errorTextView := tview.NewTextView().
+						SetText(fmt.Sprintf("Make failed for server %d: %v\n\nOutput:\n%s", i, err, string(output))).
+						SetDynamicColors(true).
+						SetWordWrap(true).
+						SetScrollable(true).
+						SetBorder(true).
+						SetTitle("Make Error Details")
+
+					// Create a flex layout with the text view and OK button
+					errorFlex := tview.NewFlex().SetDirection(tview.FlexRow).
+						AddItem(errorTextView, 0, 1, true).
+						AddItem(tview.NewButton("OK").SetSelectedFunc(func() {
+							pages.RemovePage("fleet_make_error_modal")
+						}), 1, 0, false)
+
+					pages.AddPage("fleet_make_error_modal", errorFlex, true, true)
+					app.SetFocus(errorTextView)
+				})
+				return
+			} else {
+				// Show make output on success
+				updateOutput(fmt.Sprintf("Make output for server %d:\n%s", i, string(output)))
+			}
+
+			// Generate TLS certificates for this server
+			updateOutput(fmt.Sprintf("Generating TLS certificates for server %d...", i))
+			pemCmd := exec.Command("make", "pem")
+			pemCmd.Dir = sourceDir
+			// Provide non-interactive answers for certificate generation
+			pemCmd.Stdin = strings.NewReader("\n\nTestFleet\nIRCd\nfleet-" + suffix + "-" + fmt.Sprintf("%d", i) + ".test\n\n\n\n")
+			if output, err := pemCmd.CombinedOutput(); err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("fleet_progress_modal")
+
+					// Create a scrollable text view for the error output
+					errorTextView := tview.NewTextView().
+						SetText(fmt.Sprintf("Certificate generation failed for server %d: %v\n\nOutput:\n%s", i, err, string(output))).
+						SetDynamicColors(true).
+						SetWordWrap(true).
+						SetScrollable(true).
+						SetBorder(true).
+						SetTitle("Certificate Generation Error Details")
+
+					// Create a flex layout with the text view and OK button
+					errorFlex := tview.NewFlex().SetDirection(tview.FlexRow).
+						AddItem(errorTextView, 0, 1, true).
+						AddItem(tview.NewButton("OK").SetSelectedFunc(func() {
+							pages.RemovePage("fleet_pem_error_modal")
+						}), 1, 0, false)
+
+					pages.AddPage("fleet_pem_error_modal", errorFlex, true, true)
+					app.SetFocus(errorTextView)
+				})
+				return
+			} else {
+				// Show certificate generation output on success
+				updateOutput(fmt.Sprintf("Certificate generation output for server %d:\n%s", i, string(output)))
+			}
+
+			updateOutput(fmt.Sprintf("Installing server %d of %d...", i, numServers))
+
+			// Run make install
+			installCmd := exec.Command("make", "install")
+			installCmd.Dir = sourceDir
+			if output, err := installCmd.CombinedOutput(); err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("fleet_progress_modal")
+
+					// Create a scrollable text view for the error output
+					errorTextView := tview.NewTextView().
+						SetText(fmt.Sprintf("Install failed for server %d: %v\n\nOutput:\n%s", i, err, string(output))).
+						SetDynamicColors(true).
+						SetWordWrap(true).
+						SetScrollable(true).
+						SetBorder(true).
+						SetTitle("Install Error Details")
+
+					// Create a flex layout with the text view and OK button
+					errorFlex := tview.NewFlex().SetDirection(tview.FlexRow).
+						AddItem(errorTextView, 0, 1, true).
+						AddItem(tview.NewButton("OK").SetSelectedFunc(func() {
+							pages.RemovePage("fleet_install_error_modal")
+						}), 1, 0, false)
+
+					pages.AddPage("fleet_install_error_modal", errorFlex, true, true)
+					app.SetFocus(errorTextView)
+				})
+				return
+			} else {
+				// Show install output on success
+				updateOutput(fmt.Sprintf("Install output for server %d:\n%s", i, string(output)))
+			}
+
+			// Clean build artifacts for next server
+			cleanCmd := exec.Command("make", "clean")
+			cleanCmd.Dir = sourceDir
+			cleanCmd.Run() // Ignore errors for clean
+		}
+
+		for i := 1; i <= numServers; i++ {
+			updateOutput(fmt.Sprintf("Setting up server %d of %d...", i, numServers))
+
+			// Create build directory
+			buildDir := filepath.Join(usr.HomeDir, fmt.Sprintf("unrealircd-fleet-%s-%d", suffix, i))
+			if err := os.MkdirAll(buildDir, 0755); err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("fleet_progress_modal")
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Error creating build directory for server %d: %v", i, err)).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("fleet_build_dir_error_modal")
+						})
+					pages.AddPage("fleet_build_dir_error_modal", errorModal, true, true)
+				})
+				return
+			}
+
+			// Configure server-specific settings
+			confDir := filepath.Join(buildDir, "conf")
+			if err := os.MkdirAll(confDir, 0755); err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("fleet_progress_modal")
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Error creating conf directory for server %d: %v", i, err)).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("fleet_conf_dir_error_modal")
+						})
+					pages.AddPage("fleet_conf_dir_error_modal", errorModal, true, true)
+				})
+				return
+			}
+
+			// Copy and modify server-specific config from example.conf
+			exampleConfPath := filepath.Join(sourceDir, "doc", "conf", "examples", "example.conf")
+			exampleContent, err := os.ReadFile(exampleConfPath)
+			if err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("fleet_progress_modal")
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Error reading example.conf for server %d: %v", i, err)).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("fleet_example_read_error_modal")
+						})
+					pages.AddPage("fleet_example_read_error_modal", errorModal, true, true)
+				})
+				return
+			}
+
+			// Modify the config for this server
+			configContent := modifyFleetServerConfig(string(exampleContent), suffix, i, numServers)
+			configPath := filepath.Join(confDir, "unrealircd.conf")
+			if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("fleet_progress_modal")
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Error writing config for server %d: %v", i, err)).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("fleet_config_write_error_modal")
+						})
+					pages.AddPage("fleet_config_write_error_modal", errorModal, true, true)
+				})
+				return
+			}
+
+			// Create symbolic links for required directories
+			links := map[string]string{
+				"conf": "etc",
+				"logs": "logs",
+				"data": "data",
+				"tmp":  "tmp",
+			}
+
+			for linkName, targetName := range links {
+				linkPath := filepath.Join(buildDir, linkName)
+				targetPath := filepath.Join(buildDir, targetName)
+				if err := os.Symlink(targetPath, linkPath); err != nil && !os.IsExist(err) {
+					app.QueueUpdateDraw(func() {
+						pages.RemovePage("fleet_progress_modal")
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Error creating symlink for server %d: %v", i, err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("fleet_symlink_error_modal")
+							})
+						pages.AddPage("fleet_symlink_error_modal", errorModal, true, true)
+					})
+					return
+				}
+			}
+		}
+
+		// Generate and add link blocks between servers
+		updateOutput("Generating link blocks between servers...")
+		if err := generateFleetLinkBlocks(suffix, numServers, usr.HomeDir, updateOutput); err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("fleet_progress_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Error generating link blocks: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("fleet_link_error_modal")
+					})
+				pages.AddPage("fleet_link_error_modal", errorModal, true, true)
+			})
+			return
 		}
 
 		// Success!
 		app.QueueUpdateDraw(func() {
 			pages.RemovePage("fleet_progress_modal")
 			successModal := tview.NewModal().
-				SetText(fmt.Sprintf("Test fleet created successfully!\n\nCreated %d UnrealIRCd servers in spanning tree topology.\n\nSource directory: ~/unrealircd-fleet-%s\nBuild directories: ~/unrealircd-fleet-%s-1 through ~/unrealircd-fleet-%s-%d", numServers, randomSuffix, randomSuffix, randomSuffix, numServers)).
+				SetText(fmt.Sprintf("Test fleet created successfully!\n\nFleet suffix: %s\nServers: %d\n\nSource directory: %s\nBuild directories: %s-1 through %s-%d", suffix, numServers, sourceDir, fmt.Sprintf("unrealircd-fleet-%s", suffix), fmt.Sprintf("unrealircd-fleet-%s", suffix), numServers)).
 				AddButtons([]string{"OK"}).
 				SetDoneFunc(func(int, string) {
 					pages.RemovePage("fleet_success_modal")
-					pages.RemovePage("test_fleet")
 					pages.SwitchToPage("tests_submenu")
 				})
 			pages.AddPage("fleet_success_modal", successModal, true, true)
 		})
 	}()
+}
+
+func runTestFleetCLI(numServers int) {
+	fmt.Printf("Creating test fleet with %d servers...\n", numServers)
+
+	// Fetch the latest version info
+	fmt.Print("Fetching latest UnrealIRCd version... ")
+	resp, err := http.Get("https://www.unrealircd.org/downloads/list.json")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	var updateResp UpdateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&updateResp); err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing update info: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Find stable version
+	var stableVersion string
+	var downloadURL string
+	for _, versions := range updateResp {
+		if stable, ok := versions["Stable"]; ok {
+			stableVersion = stable.Version
+			downloadURL = stable.Downloads.Src
+			break
+		}
+	}
+	if stableVersion == "" || downloadURL == "" {
+		fmt.Fprintf(os.Stderr, "No stable version found in update info.\n")
+		os.Exit(1)
+	}
+	fmt.Printf("Found %s\n", stableVersion)
+
+	// Generate random suffix
+	randomBytes := make([]byte, 4)
+	rand.Read(randomBytes)
+	randomSuffix := hex.EncodeToString(randomBytes)[:8]
+
+	// Download the source
+	fmt.Print("Downloading source... ")
+	resp, err = http.Get(downloadURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	// Create temp file for the downloaded archive
+	tempFile, err := os.CreateTemp("", "unrealircd-fleet-*.tar.gz")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating temp file: %v\n", err)
+		os.Exit(1)
+	}
+	defer os.Remove(tempFile.Name())
+	defer tempFile.Close()
+
+	_, err = io.Copy(tempFile, resp.Body)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving download: %v\n", err)
+		os.Exit(1)
+	}
+	tempFile.Close()
+	fmt.Println("Done")
+
+	// Now create each server in the fleet
+	usr, _ := user.Current()
+	baseDir := usr.HomeDir
+
+	// Create the shared source directory with random suffix
+	sourceDir := filepath.Join(baseDir, fmt.Sprintf("unrealircd-fleet-%s", randomSuffix))
+
+	// Remove existing source directory if it exists
+	os.RemoveAll(sourceDir)
+
+	// Extract source once
+	fmt.Printf("Extracting source to %s... ", sourceDir)
+	err = extractTarGz(tempFile.Name(), sourceDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error extracting source: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Done")
+
+	for i := 1; i <= numServers; i++ {
+		fmt.Printf("Setting up server %d of %d... ", i, numServers)
+
+		// Create build directory for this server with suffix + number
+		buildDir := filepath.Join(baseDir, fmt.Sprintf("unrealircd-fleet-%s-%d", randomSuffix, i))
+
+		// Remove existing build directory if it exists
+		os.RemoveAll(buildDir)
+
+		// Configure this server
+		err = configureFleetServer(sourceDir, buildDir, i, numServers, stableVersion)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error configuring server %d: %v\n", i, err)
+			os.Exit(1)
+		}
+		fmt.Println("Done")
+	}
+
+	// Success!
+	fmt.Printf("\nTest fleet created successfully!\n\n")
+	fmt.Printf("Created %d UnrealIRCd servers in spanning tree topology.\n\n", numServers)
+	fmt.Printf("Source directory: ~/unrealircd-fleet-%s\n", randomSuffix)
+	fmt.Printf("Build directories: ~/unrealircd-fleet-%s-1 through ~/unrealircd-fleet-%s-%d\n", randomSuffix, randomSuffix, numServers)
 }
 
 func configureFleetServer(sourceDir, buildDir string, serverIndex, totalServers int, version string) error {
@@ -3393,7 +4536,7 @@ func configureFleetServer(sourceDir, buildDir string, serverIndex, totalServers 
 func configureFleetServerWithOutput(sourceDir, buildDir string, serverIndex, totalServers int, version string, updateOutput func(string)) error {
 	// Save config.settings
 	updateOutput("  Saving configuration...")
-	err := saveConfigSettings(sourceDir, buildDir, "0600", "", "1", "2000", "classic", "auto", "", "")
+	err := saveConfigSettings(sourceDir, buildDir, "0600", "", "0", "2000", "classic", "auto", "", "")
 	if err != nil {
 		return fmt.Errorf("saving config.settings: %w", err)
 	}
@@ -3435,106 +4578,6 @@ func configureFleetServerWithOutput(sourceDir, buildDir string, serverIndex, tot
 	return nil
 }
 
-func runTestFleetCLI(numServers int) {
-	fmt.Printf("Creating test fleet with %d servers...\n", numServers)
-
-	// Fetch the latest version info
-	fmt.Print("Fetching latest UnrealIRCd version... ")
-	resp, err := http.Get("https://www.unrealircd.org/downloads/list.json")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-
-	var updateResp UpdateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&updateResp); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing update info: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Find stable version
-	var stableVersion string
-	var downloadURL string
-	for _, versions := range updateResp {
-		if stable, ok := versions["Stable"]; ok {
-			stableVersion = stable.Version
-			downloadURL = stable.Downloads.Src
-			break
-		}
-	}
-	if stableVersion == "" || downloadURL == "" {
-		fmt.Fprintf(os.Stderr, "Error: No stable version found\n")
-		os.Exit(1)
-	}
-	fmt.Printf("Found %s\n", stableVersion)
-
-	// Generate random suffix
-	randomBytes := make([]byte, 4)
-	rand.Read(randomBytes)
-	randomSuffix := hex.EncodeToString(randomBytes)[:8]
-
-	usr, _ := user.Current()
-	baseDir := usr.HomeDir
-
-	// Download the source
-	fmt.Print("Downloading source... ")
-	tempFile, err := os.CreateTemp("", "unrealircd-fleet-*.tar.gz")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating temp file: %v\n", err)
-		os.Exit(1)
-	}
-	defer os.Remove(tempFile.Name())
-	defer tempFile.Close()
-
-	resp, err = http.Get(downloadURL)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error downloading: %v\n", err)
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-
-	_, err = io.Copy(tempFile, resp.Body)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error saving download: %v\n", err)
-		os.Exit(1)
-	}
-	tempFile.Close()
-	fmt.Printf("Done\n")
-
-	// Create source directory
-	sourceDir := filepath.Join(baseDir, fmt.Sprintf("unrealircd-fleet-%s", randomSuffix))
-	fmt.Printf("Extracting to %s... ", sourceDir)
-	err = extractTarGz(tempFile.Name(), sourceDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error extracting: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("Done\n")
-
-	// Create each server
-	for i := 1; i <= numServers; i++ {
-		fmt.Printf("\rSetting up server %d of %d... ", i, numServers)
-
-		buildDir := filepath.Join(baseDir, fmt.Sprintf("unrealircd-fleet-%s-%d", randomSuffix, i))
-
-		// Remove existing build directory
-		os.RemoveAll(buildDir)
-
-		err = configureFleetServer(sourceDir, buildDir, i, numServers, stableVersion)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "\nError configuring server %d: %v\n", i, err)
-			os.Exit(1)
-		}
-	}
-	fmt.Printf("Done\n")
-
-	fmt.Printf("\nTest fleet created successfully!\n")
-	fmt.Printf("Created %d UnrealIRCd servers in spanning tree topology.\n\n", numServers)
-	fmt.Printf("Source directory: ~/unrealircd-fleet-%s\n", randomSuffix)
-	fmt.Printf("Build directories: ~/unrealircd-fleet-%s-1 through ~/unrealircd-fleet-%s-%d\n", randomSuffix, randomSuffix, numServers)
-}
-
 func configureFleetUnrealIRCdConf(buildDir string, serverIndex, totalServers int) error {
 	// First, ensure unrealircd.conf exists by copying from example.conf
 	err := setupConfigFile(buildDir)
@@ -3550,17 +4593,36 @@ func configureFleetUnrealIRCdConf(buildDir string, serverIndex, totalServers int
 		return fmt.Errorf("reading config file: %w", err)
 	}
 
-	// Replace the 'me' block with unique server name
+	contentStr := string(content)
+
+	// Replace 'irc.example.org' with the current server name
 	serverName := fmt.Sprintf("irc%d.testfleet.local", serverIndex)
+	contentStr = strings.ReplaceAll(contentStr, "irc.example.org", serverName)
+
+	// Replace the 'me' block with unique server name and three-digit SID
+	sid := fmt.Sprintf("%03d", serverIndex)
 	meBlock := fmt.Sprintf(`me {
 	name "%s";
 	info "Test Fleet Server %d";
-	numeric 1;
-};`, serverName, serverIndex)
+	sid "%s";
+};`, serverName, serverIndex, sid)
 
 	// Use regex to replace the me block
 	meRegex := regexp.MustCompile(`(?s)me\s*\{[^}]*\};`)
-	content = meRegex.ReplaceAllLiteral(content, []byte(meBlock))
+	contentStr = string(meRegex.ReplaceAllLiteral([]byte(contentStr), []byte(meBlock)))
+
+	// Replace cloak keys - replace each "and another one" with a unique random hex string
+	cloakKeyRegex := regexp.MustCompile(`"and another one";`)
+	contentStr = cloakKeyRegex.ReplaceAllStringFunc(contentStr, func(match string) string {
+		return fmt.Sprintf(`"%s";`, generateRandomHexString(80))
+	})
+
+	// Replace email address
+	contentStr = strings.ReplaceAll(contentStr, "set.this.to.email.address", "random@email.com")
+
+	// Replace oper name and password
+	contentStr = strings.ReplaceAll(contentStr, "bobsmith", "testoper")
+	contentStr = strings.ReplaceAll(contentStr, `password "$argon2id..etc..";`, `password "testpasslol";`)
 
 	// Add link blocks for spanning tree topology
 	var linkBlocks strings.Builder
@@ -3606,7 +4668,6 @@ link %s {
 	}
 
 	// Add link blocks before the closing bracket of the file
-	contentStr := string(content)
 	if linkBlocks.Len() > 0 {
 		// Find the last closing brace and add link blocks before it
 		lastBraceIndex := strings.LastIndex(contentStr, "}")

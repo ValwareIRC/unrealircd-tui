@@ -30,7 +30,7 @@ func parseLogTimestamp(timestampStr string) time.Time {
 	debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	fmt.Fprintf(debugFile, "[DEBUG] Parsing timestamp: '%s'\n", timestampStr)
 	debugFile.Close()
-	
+
 	// Try RFC3339 with nanoseconds first (format like "2025-11-10T02:31:41.077Z")
 	if t, err := time.Parse(time.RFC3339Nano, timestampStr); err == nil {
 		debugFile, _ = os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -38,7 +38,7 @@ func parseLogTimestamp(timestampStr string) time.Time {
 		debugFile.Close()
 		return t
 	}
-	
+
 	// Try RFC3339
 	if t, err := time.Parse(time.RFC3339, timestampStr); err == nil {
 		debugFile, _ = os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -46,12 +46,12 @@ func parseLogTimestamp(timestampStr string) time.Time {
 		debugFile.Close()
 		return t
 	}
-	
+
 	// Try other formats if needed
 	if t, err := time.Parse("2006-01-02T15:04:05.000Z", timestampStr); err == nil {
 		return t
 	}
-	
+
 	// If all parsing fails, return current time
 	debugFile, _ = os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	fmt.Fprintf(debugFile, "[DEBUG] Failed to parse timestamp '%s', using current time\n", timestampStr)
@@ -71,7 +71,7 @@ func sortLogEntries(entries []*rpc.FileLogEntry) {
 // formatJSONTree formats JSON data in a tree-like structure with indentation and colors
 func formatJSONTree(data interface{}, indent string) string {
 	var result strings.Builder
-	
+
 	switch v := data.(type) {
 	case map[string]interface{}:
 		// Sort keys for consistent output
@@ -80,10 +80,10 @@ func formatJSONTree(data interface{}, indent string) string {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		
+
 		for _, key := range keys {
 			result.WriteString(indent)
-			
+
 			// Check if value is a primitive (string, number, bool)
 			if isPrimitive(v[key]) {
 				// Format as key-value pair with colors
@@ -104,7 +104,7 @@ func formatJSONTree(data interface{}, indent string) string {
 			} else {
 				// Value is an object or array, put key on its own line
 				result.WriteString(fmt.Sprintf("[yellow]%s[-]\n", key))
-				
+
 				nextIndent := indent + "  "
 				result.WriteString(formatJSONTree(v[key], nextIndent))
 			}
@@ -141,7 +141,7 @@ func formatJSONTree(data interface{}, indent string) string {
 			result.WriteString(fmt.Sprintf("%s[cyan]%v[-]\n", indent, val))
 		}
 	}
-	
+
 	return result.String()
 }
 
@@ -300,9 +300,9 @@ func showRPCSetupModal(app *tview.Application, pages *tview.Pages, buildDir stri
 		AddItem(tview.NewTextView(), 0, 1, false).
 		AddItem(tview.NewFlex().
 			AddItem(tview.NewTextView(), 0, 1, false).
-		AddItem(setupForm, formWidth, 0, true).
-		AddItem(tview.NewTextView(), 0, 1, false), formHeight, 0, true).
-	AddItem(tview.NewTextView(), 0, 1, false)
+			AddItem(setupForm, formWidth, 0, true).
+			AddItem(tview.NewTextView(), 0, 1, false), formHeight, 0, true).
+		AddItem(tview.NewTextView(), 0, 1, false)
 
 	pages.AddPage("rpc_setup_modal", centeredFlex, true, true)
 }
@@ -398,10 +398,10 @@ func showRemoteControlOptions(app *tview.Application, pages *tview.Pages, config
 		default:
 			// Show info for other items
 			descriptions := map[string]string{
-				"• Channels":    "Display all channels on the network with topic, user count, and modes.",
-				"• Users":       "List all connected users with nick, realname, account, and channel memberships.",
-				"• Servers":     "Show server information including uptime, software version, and user count.",
-				"• Server Bans": "View and manage all active bans (G-lines, K-lines, Z-lines, etc).",
+				"• Channels":      "Display all channels on the network with topic, user count, and modes.",
+				"• Users":         "List all connected users with nick, realname, account, and channel memberships.",
+				"• Servers":       "Show server information including uptime, software version, and user count.",
+				"• Server Bans":   "View and manage all active bans (G-lines, K-lines, Z-lines, etc).",
 				"• Configure RPC": "Update your RPC API credentials for UnrealIRCd connection.",
 			}
 			if desc, ok := descriptions[mainText]; ok {
@@ -438,7 +438,7 @@ func loadUsersList(app *tview.Application, usersList *tview.List, userDetailsVie
 	debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	fmt.Fprintf(debugFile, "DEBUG: loadUsersList called\n")
 	debugFile.Close()
-	
+
 	// Clear existing items
 	usersList.Clear()
 
@@ -481,7 +481,7 @@ func loadUsersList(app *tview.Application, usersList *tview.List, userDetailsVie
 		debugText += "No users found (empty list)"
 	}
 	// fmt.Printf("DEBUG UI: %s\n", debugText) // Print to console for debugging
-	
+
 	// Update UI synchronously
 	// userDetailsView.SetText(debugText)
 	userDetailsView.SetText("Select a user to view details.")
@@ -516,13 +516,13 @@ func loadUsersList(app *tview.Application, usersList *tview.List, userDetailsVie
 	usersList.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
 		if index >= 0 && index < len(users) {
 			user := users[index]
-			
+
 			// Format account display
 			accountDisplay := user.Account
 			if accountDisplay == "" || accountDisplay == "none" {
 				accountDisplay = "None (not logged in)"
 			}
-			
+
 			// Format channels
 			channelsStr := ""
 			if len(user.Channels) > 0 {
@@ -534,7 +534,7 @@ func loadUsersList(app *tview.Application, usersList *tview.List, userDetailsVie
 			} else {
 				channelsStr = "\n  None"
 			}
-			
+
 			// Format security groups
 			securityGroupsStr := ""
 			if len(user.SecurityGroups) > 0 {
@@ -546,7 +546,7 @@ func loadUsersList(app *tview.Application, usersList *tview.List, userDetailsVie
 			} else {
 				securityGroupsStr = "\n  None"
 			}
-			
+
 			details := fmt.Sprintf(
 				"[green]Nick:[white]\n  %s\n"+
 					"[green]Real Name:[white]\n  %s\n"+
@@ -568,13 +568,13 @@ func loadUsersList(app *tview.Application, usersList *tview.List, userDetailsVie
 	// Show first user details by default
 	if len(users) > 0 {
 		user := users[0]
-		
+
 		// Format account display
 		accountDisplay := user.Account
 		if accountDisplay == "" || accountDisplay == "none" {
 			accountDisplay = "None (not logged in)"
 		}
-		
+
 		// Format channels
 		channelsStr := ""
 		if len(user.Channels) > 0 {
@@ -586,7 +586,7 @@ func loadUsersList(app *tview.Application, usersList *tview.List, userDetailsVie
 		} else {
 			channelsStr = "\n  None"
 		}
-		
+
 		// Format security groups
 		securityGroupsStr := ""
 		if len(user.SecurityGroups) > 0 {
@@ -598,7 +598,7 @@ func loadUsersList(app *tview.Application, usersList *tview.List, userDetailsVie
 		} else {
 			securityGroupsStr = "\n  None"
 		}
-		
+
 		details := fmt.Sprintf(
 			"[green]Nick:[white]\n  %s\n"+
 				"[green]Real Name:[white]\n  %s\n"+
@@ -670,10 +670,10 @@ func loadChannelsList(app *tview.Application, channelsList *tview.List, channelD
 	channelsList.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
 		if index >= 0 && index < len(channels) {
 			channel := channels[index]
-			
+
 			// Show loading message
 			channelDetailsView.SetText("Loading channel details...")
-			
+
 			// Get detailed channel info in background
 			go func() {
 				client, err := rpc.NewRPCClient(config)
@@ -684,14 +684,14 @@ func loadChannelsList(app *tview.Application, channelsList *tview.List, channelD
 					return
 				}
 				defer client.Close()
-				
+
 				if err := client.Connect(); err != nil {
 					app.QueueUpdateDraw(func() {
 						channelDetailsView.SetText(fmt.Sprintf("Error connecting to RPC server: %v", err))
 					})
 					return
 				}
-				
+
 				detailedChannel, err := client.GetChannelDetails(channel.Name)
 				if err != nil {
 					app.QueueUpdateDraw(func() {
@@ -699,7 +699,7 @@ func loadChannelsList(app *tview.Application, channelsList *tview.List, channelD
 					})
 					return
 				}
-				
+
 				// Format users list
 				usersStr := ""
 				if len(detailedChannel.Users) > 0 {
@@ -711,19 +711,19 @@ func loadChannelsList(app *tview.Application, channelsList *tview.List, channelD
 				} else {
 					usersStr = "\n  None"
 				}
-				
+
 				details := fmt.Sprintf(
 					"[green]Name:[white]\n  %s\n"+
 						"[green]Topic:[white]\n  %s\n"+
 						"[green]Modes:[white]\n  %s\n"+
 						"[green]Created:[white]\n  %s\n"+
 						"[green]Users:[white]%s",
-					detailedChannel.Name, 
-					detailedChannel.Topic, 
-					detailedChannel.Modes, 
+					detailedChannel.Name,
+					detailedChannel.Topic,
+					detailedChannel.Modes,
 					time.Unix(detailedChannel.Created, 0).Format("2006-01-02 15:04:05"),
 					usersStr)
-				
+
 				// Update UI in main thread
 				app.QueueUpdateDraw(func() {
 					channelDetailsView.SetText(details)
@@ -735,10 +735,10 @@ func loadChannelsList(app *tview.Application, channelsList *tview.List, channelD
 	// Show first channel details by default - but need to load detailed info
 	if len(channels) > 0 {
 		channel := channels[0]
-		
+
 		// Show loading message initially
 		channelDetailsView.SetText("Select a channel to view details.")
-		
+
 		// Auto-load first channel details
 		go func() {
 			client, err := rpc.NewRPCClient(config)
@@ -749,14 +749,14 @@ func loadChannelsList(app *tview.Application, channelsList *tview.List, channelD
 				return
 			}
 			defer client.Close()
-			
+
 			if err := client.Connect(); err != nil {
 				app.QueueUpdateDraw(func() {
 					channelDetailsView.SetText(fmt.Sprintf("Error connecting to RPC server: %v", err))
 				})
 				return
 			}
-			
+
 			detailedChannel, err := client.GetChannelDetails(channel.Name)
 			if err != nil {
 				app.QueueUpdateDraw(func() {
@@ -764,7 +764,7 @@ func loadChannelsList(app *tview.Application, channelsList *tview.List, channelD
 				})
 				return
 			}
-			
+
 			// Format users list
 			usersStr := ""
 			if len(detailedChannel.Users) > 0 {
@@ -776,19 +776,19 @@ func loadChannelsList(app *tview.Application, channelsList *tview.List, channelD
 			} else {
 				usersStr = "\n  None"
 			}
-			
+
 			details := fmt.Sprintf(
 				"[green]Name:[white]\n  %s\n"+
 					"[green]Topic:[white]\n  %s\n"+
 					"[green]Modes:[white]\n  %s\n"+
 					"[green]Created:[white]\n  %s\n"+
 					"[green]Users:[white]%s",
-				detailedChannel.Name, 
-				detailedChannel.Topic, 
-				detailedChannel.Modes, 
+				detailedChannel.Name,
+				detailedChannel.Topic,
+				detailedChannel.Modes,
 				time.Unix(detailedChannel.Created, 0).Format("2006-01-02 15:04:05"),
 				usersStr)
-			
+
 			// Update UI in main thread
 			app.QueueUpdateDraw(func() {
 				channelDetailsView.SetText(details)
@@ -834,17 +834,17 @@ func reconfigureRPC(app *tview.Application, pages *tview.Pages, buildDir string)
 
 func remoteLogStreamingPage(app *tview.Application, pages *tview.Pages, config *rpc.RPCConfig, buildDir string) {
 	var updateLogDisplay func() // Function to update the log display
-	
+
 	debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	fmt.Fprintf(debugFile, "[DEBUG] remoteLogStreamingPage called\n")
 	debugFile.Close()
-	
+
 	client, err := rpc.NewRPCClient(config)
 	if err != nil {
 		debugFile, _ = os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		fmt.Fprintf(debugFile, "[DEBUG] Failed to create RPC client: %v\n", err)
 		debugFile.Close()
-		
+
 		errorModal := tview.NewModal().
 			SetText(fmt.Sprintf("Failed to create RPC client: %v", err)).
 			AddButtons([]string{"OK"}).
@@ -902,7 +902,7 @@ func remoteLogStreamingPage(app *tview.Application, pages *tview.Pages, config *
 
 	// Log levels to filter by
 	levels := []string{"error", "warn", "info", "debug", "fatal"}
-	var selectedLevelsMutex sync.Mutex // Protect selectedLevels slice
+	var selectedLevelsMutex sync.Mutex                                    // Protect selectedLevels slice
 	selectedLevels := []string{"error", "warn", "info", "debug", "fatal"} // All levels selected by default
 
 	for _, level := range levels {
@@ -913,7 +913,7 @@ func remoteLogStreamingPage(app *tview.Application, pages *tview.Pages, config *
 			debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 			fmt.Fprintf(debugFile, "[DEBUG] Checkbox %s changed to %v\n", levelCopy, checked)
 			debugFile.Close()
-			
+
 			// This will trigger filtering update
 			selectedLevelsMutex.Lock()
 			if checked {
@@ -970,7 +970,7 @@ func remoteLogStreamingPage(app *tview.Application, pages *tview.Pages, config *
 			if searchTimer != nil {
 				searchTimer.Stop()
 			}
-			
+
 			// Start a new timer that will trigger the update after 300ms of no changes
 			searchTimer = time.AfterFunc(300*time.Millisecond, func() {
 				if updateLogDisplay != nil {
@@ -996,10 +996,10 @@ func remoteLogStreamingPage(app *tview.Application, pages *tview.Pages, config *
 	// Channel for log events
 	stopChan := make(chan bool, 1)
 	var streamingGoroutineRunning bool
-	var allLogEntries []*rpc.FileLogEntry // Store all log entries
+	var allLogEntries []*rpc.FileLogEntry      // Store all log entries
 	var filteredLogEntries []*rpc.FileLogEntry // Store filtered entries for display
-	var logEntriesMutex sync.Mutex     // Protect logEntries from concurrent access
-	const maxLogLines = 1000 // Keep only last 1000 lines
+	var logEntriesMutex sync.Mutex             // Protect logEntries from concurrent access
+	const maxLogLines = 1000                   // Keep only last 1000 lines
 
 	// Function to update the log display based on current filters
 	updateLogDisplay = func() {
@@ -1016,14 +1016,14 @@ func remoteLogStreamingPage(app *tview.Application, pages *tview.Pages, config *
 
 		// Filter entries based on selected levels and search text
 		filteredLogEntries = []*rpc.FileLogEntry{}
-		
+
 		// Debug: log selected levels
 		selectedLevelsMutex.Lock()
 		debugFile, _ = os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		fmt.Fprintf(debugFile, "[DEBUG] Selected levels: %v\n", selectedLevels)
 		debugFile.Close()
 		selectedLevelsMutex.Unlock()
-		
+
 		for _, entry := range allLogEntries {
 			// Check level filter
 			selectedLevelsMutex.Lock()
@@ -1036,12 +1036,12 @@ func remoteLogStreamingPage(app *tview.Application, pages *tview.Pages, config *
 				}
 			}
 			selectedLevelsMutex.Unlock()
-			
+
 			// Debug: log level check
 			debugFile, _ = os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 			fmt.Fprintf(debugFile, "[DEBUG] Entry level '%s' (%s), selected: %v\n", entry.Level, entryLevelLower, levelSelected)
 			debugFile.Close()
-			
+
 			if !levelSelected {
 				continue
 			}
@@ -1056,7 +1056,7 @@ func remoteLogStreamingPage(app *tview.Application, pages *tview.Pages, config *
 
 			filteredLogEntries = append(filteredLogEntries, entry)
 		}
-		
+
 		// Debug: log filtered count
 		debugFile, _ = os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		fmt.Fprintf(debugFile, "[DEBUG] Filtered to %d entries\n", len(filteredLogEntries))
@@ -1088,12 +1088,12 @@ func remoteLogStreamingPage(app *tview.Application, pages *tview.Pages, config *
 				logList.AddItem(mainText, "", 0, nil)
 				addedCount++
 			}
-			
+
 			// Debug: log how many items were added
 			debugFile, _ = os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 			fmt.Fprintf(debugFile, "[DEBUG] Added %d items to logList (filteredLogEntries has %d)\n", addedCount, len(filteredLogEntries))
 			debugFile.Close()
-			
+
 			if len(filteredLogEntries) > 0 {
 				logList.SetCurrentItem(len(filteredLogEntries) - 1) // Show latest log at bottom
 			}
@@ -1112,13 +1112,13 @@ func remoteLogStreamingPage(app *tview.Application, pages *tview.Pages, config *
 		debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		fmt.Fprintf(debugFile, "[DEBUG] Back button pressed, streamingGoroutineRunning: %v\n", streamingGoroutineRunning)
 		debugFile.Close()
-		
+
 		// Cancel any pending search timer
 		if searchTimer != nil {
 			searchTimer.Stop()
 			searchTimer = nil
 		}
-		
+
 		// Stop streaming if active
 		if streamingGoroutineRunning {
 			select {
@@ -1134,12 +1134,12 @@ func remoteLogStreamingPage(app *tview.Application, pages *tview.Pages, config *
 	inspectBtn := tview.NewButton("Inspect Log").SetSelectedFunc(func() {
 		// Get the currently selected item index
 		selectedIndex := logList.GetCurrentItem()
-		
+
 		// Check if we have log entries and a valid selection
 		logEntriesMutex.Lock()
 		validSelection := len(filteredLogEntries) > 0 && selectedIndex >= 0 && selectedIndex < len(filteredLogEntries)
 		logEntriesMutex.Unlock()
-		
+
 		if !validSelection {
 			errorModal := tview.NewModal().
 				SetText("No log entry selected or no logs available. Please select a log entry first.").
@@ -1150,12 +1150,12 @@ func remoteLogStreamingPage(app *tview.Application, pages *tview.Pages, config *
 			pages.AddPage("no_selection_modal", errorModal, true, true)
 			return
 		}
-		
+
 		// Get the log entry from filtered entries
 		logEntriesMutex.Lock()
 		entry := filteredLogEntries[selectedIndex]
 		logEntriesMutex.Unlock()
-		
+
 		// Parse the raw JSON to get all fields including nested objects
 		var entryData map[string]interface{}
 		if err := json.Unmarshal([]byte(entry.RawJSON), &entryData); err != nil {
@@ -1168,10 +1168,10 @@ func remoteLogStreamingPage(app *tview.Application, pages *tview.Pages, config *
 			pages.AddPage("json_error_modal", errorModal, true, true)
 			return
 		}
-		
+
 		// Format as tree structure
 		formattedText := formatJSONTree(entryData, "")
-		
+
 		// Create a text view to display the formatted JSON
 		jsonView := tview.NewTextView()
 		jsonView.SetBorder(true).SetTitle(fmt.Sprintf("Log Entry %d", selectedIndex+1))
@@ -1179,7 +1179,7 @@ func remoteLogStreamingPage(app *tview.Application, pages *tview.Pages, config *
 		jsonView.SetWordWrap(true)
 		jsonView.SetScrollable(true)
 		jsonView.SetText(formattedText)
-		
+
 		// Create modal with the JSON view
 		jsonFlex := tview.NewFlex().SetDirection(tview.FlexRow)
 		jsonFlex.AddItem(jsonView, 0, 1, true)
@@ -1187,7 +1187,7 @@ func remoteLogStreamingPage(app *tview.Application, pages *tview.Pages, config *
 			pages.RemovePage("json_inspect_modal")
 		})
 		jsonFlex.AddItem(closeBtn, 3, 0, false)
-		
+
 		pages.AddPage("json_inspect_modal", jsonFlex, true, true)
 	})
 
