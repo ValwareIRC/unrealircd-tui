@@ -3,10 +3,10 @@ package ui
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"reflect"
+	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
@@ -107,6 +107,53 @@ func showConfigurationOptions(app *tview.Application, pages *tview.Pages, confDi
 		}
 	}
 
+	// Add selected func for editing files (after reload is defined)
+	list.SetSelectedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		// This will be called for both Enter and mouse clicks, so we need to distinguish
+		// For now, let's disable this and handle Enter via input capture
+	})
+
+	// Helper function to check if a file is protected from editing
+	isProtectedFile := func(fileName string) bool {
+		protectedFiles := []string{
+			"modules.default.conf",
+			"snomask.default.conf",
+			"operclass.default.conf",
+			"rpc-class.default.conf",
+			"rpc.modules.default.conf",
+		}
+		for _, protected := range protectedFiles {
+			if fileName == protected {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Handle Enter key specifically for editing files
+	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEnter {
+			mainText, _ := list.GetItemText(list.GetCurrentItem())
+			if strings.HasPrefix(mainText, "📄") {
+				fileName := strings.TrimPrefix(mainText, "📄 ")
+				if isProtectedFile(fileName) {
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Cannot edit protected file: %s\n\nThis is a system default configuration file.", fileName)).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("edit_protected_error_modal")
+						})
+					pages.AddPage("edit_protected_error_modal", errorModal, true, true)
+					return nil // Consume the event
+				}
+				filePath := filepath.Join(currentPath, fileName)
+				showEditModal(app, pages, filePath, reload)
+				return nil // Consume the event
+			}
+		}
+		return event // Pass through other events
+	})
+
 	// Initial load
 	reload()
 
@@ -132,6 +179,19 @@ func showConfigurationOptions(app *tview.Application, pages *tview.Pages, confDi
 					pages.RemovePage("edit_error_modal")
 				})
 			pages.AddPage("edit_error_modal", errorModal, true, true)
+			return
+		}
+
+		// Check if it's a protected file
+		fileName := filepath.Base(currentSelectedPath)
+		if isProtectedFile(fileName) {
+			errorModal := tview.NewModal().
+				SetText(fmt.Sprintf("Cannot edit protected file: %s\n\nThis is a system default configuration file.", fileName)).
+				AddButtons([]string{"OK"}).
+				SetDoneFunc(func(int, string) {
+					pages.RemovePage("edit_protected_error_modal")
+				})
+			pages.AddPage("edit_protected_error_modal", errorModal, true, true)
 			return
 		}
 
@@ -260,9 +320,8 @@ func loadConfigurationList(list *tview.List, previewView *tview.TextView, curren
 			return func() {
 				if id {
 					navigate(ep)
-				} else {
-					previewFile(previewView, ep)
 				}
+				// Files don't need special handling here - SetSelectedFunc handles editing
 			}
 		}(entryPath, isDir))
 	}
@@ -289,6 +348,94 @@ func previewFolder(previewView *tview.TextView, path string) {
 	previewView.SetText(content.String())
 }
 
+func highlightUnrealIRCdConfig(content string) string {
+	// Simple syntax highlighting for UnrealIRCd config files
+	// Use tview color tags for proper rendering
+
+	lines := strings.Split(content, "\n")
+	var result []string
+
+	// Common UnrealIRCd configuration keywords
+	keywords := []string{
+		"loadmodule", "include", "rpc-user", "set", "oper", "password", "vhost",
+		"me", "admin", "class", "allow", "listen", "link", "ulines", "ban",
+		"except", "tld", "log", "alias", "channel", "badword", "spamfilter",
+		"deny", "connect", "drpass", "restartpass", "diepass",
+		"motd", "rules", "services", "cloak", "cgiirc", "webirc", "geoip",
+		"blacklist", "dnsbl", "throttle", "antirandom", "antimixedutf8",
+	}
+
+	for _, line := range lines {
+		originalLine := line
+		highlighted := line
+
+		// Color braces and parentheses first
+		highlighted = strings.ReplaceAll(highlighted, "{", "[red]{[-]")
+		highlighted = strings.ReplaceAll(highlighted, "}", "[red]}[-]")
+		highlighted = strings.ReplaceAll(highlighted, "(", "[white]([-]")
+		highlighted = strings.ReplaceAll(highlighted, ")", "[white])[-]")
+
+		// Color strings first
+		inString := false
+		stringStart := -1
+		quoteChar := byte(0)
+		for i, char := range highlighted {
+			if (char == '"' || char == '\'') && (i == 0 || highlighted[i-1] != '\\') {
+				if !inString {
+					inString = true
+					stringStart = i
+					quoteChar = byte(char)
+				} else if byte(char) == quoteChar {
+					inString = false
+					// Color the string
+					before := highlighted[:stringStart]
+					stringPart := highlighted[stringStart : i+1]
+					after := highlighted[i+1:]
+					highlighted = before + "[blue]" + stringPart + "[-]" + after
+					break // Only color first string per line for simplicity
+				}
+			}
+		}
+
+		// Color keywords - but skip those that are inside quotes in the original line
+		// We need to process matches in order and track position
+		for _, keyword := range keywords {
+			// Use word boundaries to avoid partial matches
+			pattern := `\b` + keyword + `\b`
+			re := regexp.MustCompile(pattern)
+			// Find all matches with their positions
+			matches := re.FindAllStringIndex(originalLine, -1)
+			// Process them in reverse order to avoid position shifting
+			for i := len(matches) - 1; i >= 0; i-- {
+				match := originalLine[matches[i][0]:matches[i][1]]
+				matchStart := matches[i][0]
+
+				// Count quotes before this match position
+				quoteCount := 0
+				for j := 0; j < matchStart; j++ {
+					if (originalLine[j] == '"' || originalLine[j] == '\'') && (j == 0 || originalLine[j-1] != '\\') {
+						quoteCount++
+					}
+				}
+
+				// If odd number of quotes, we're inside a string, skip
+				if quoteCount%2 == 1 {
+					continue
+				}
+
+				// Replace this specific occurrence
+				before := highlighted[:matches[i][0]]
+				after := highlighted[matches[i][1]:]
+				highlighted = before + "[green]" + match + "[-]" + after
+			}
+		}
+
+		result = append(result, highlighted)
+	}
+
+	return strings.Join(result, "\n")
+}
+
 func previewFile(previewView *tview.TextView, path string) {
 	// For files, show content
 	content, err := os.ReadFile(path)
@@ -303,7 +450,13 @@ func previewFile(previewView *tview.TextView, path string) {
 		previewContent = previewContent[:10000] + "\n\n[File truncated for preview]"
 	}
 
-	previewView.SetText(fmt.Sprintf("File: %s\n\n%s", filepath.Base(path), previewContent))
+	// Check if this is a .conf file for syntax highlighting
+	fileName := filepath.Base(path)
+	if strings.HasSuffix(fileName, ".conf") {
+		previewContent = highlightUnrealIRCdConfig(previewContent)
+	}
+
+	previewView.SetText(fmt.Sprintf("File: %s\n\n%s", fileName, previewContent))
 }
 
 func showNewItemModal(app *tview.Application, pages *tview.Pages, currentPath string, isFile bool, reload func()) {
@@ -364,10 +517,26 @@ func showNewItemModal(app *tview.Application, pages *tview.Pages, currentPath st
 	pages.AddPage("new_item_modal", form, true, true)
 }
 
-func showEditModal(app *tview.Application, pages *tview.Pages, filePath string, reload func()) {
-	// Load file content
-	content, err := os.ReadFile(filePath)
+func showEditorWithChoice(app *tview.Application, pages *tview.Pages, filePath string, reload func(), editor string) {
+	// Create a temporary file for editing
+	tempFile, err := os.CreateTemp("", "unrealircd-edit-*.tmp")
 	if err != nil {
+		errorModal := tview.NewModal().
+			SetText(fmt.Sprintf("Error creating temporary file: %v", err)).
+			AddButtons([]string{"OK"}).
+			SetDoneFunc(func(int, string) {
+				pages.RemovePage("edit_temp_error_modal")
+			})
+		pages.AddPage("edit_temp_error_modal", errorModal, true, true)
+		return
+	}
+	tempPath := tempFile.Name()
+	tempFile.Close()
+
+	// Copy original file to temp file
+	originalContent, err := os.ReadFile(filePath)
+	if err != nil {
+		os.Remove(tempPath) // cleanup
 		errorModal := tview.NewModal().
 			SetText(fmt.Sprintf("Error reading file: %v", err)).
 			AddButtons([]string{"OK"}).
@@ -378,252 +547,151 @@ func showEditModal(app *tview.Application, pages *tview.Pages, filePath string, 
 		return
 	}
 
-	// Create text area
-	textArea := tview.NewTextArea()
-	textArea.SetBorder(true)
-	textArea.SetTitle(fmt.Sprintf("Editing: %s", filepath.Base(filePath)))
-	textArea.SetText(string(content), false)
-	textArea.SetWordWrap(false)
-
-	// Input field for find/goto
-	inputField := tview.NewInputField()
-	inputField.SetBorder(true)
-	inputField.SetTitle("Command Input")
-	inputField.SetFieldBackgroundColor(tcell.ColorWhite)
-	inputField.SetFieldTextColor(tcell.ColorBlack)
-	inputField.SetBorderColor(tcell.ColorYellow)
-
-	// Add shortcuts banner
-	shortcutsView := tview.NewTextView()
-	shortcutsView.SetTextAlign(tview.AlignCenter)
-	shortcutsView.SetTextColor(tcell.ColorYellow)
-	shortcutsView.SetBorder(true)
-	shortcutsView.SetBorderColor(tcell.ColorBlue)
-
-	saveBtn := tview.NewButton("Save").SetSelectedFunc(func() {
-		newContent := textArea.GetText()
-		err := os.WriteFile(filePath, []byte(newContent), 0644)
-		if err != nil {
-			errorModal := tview.NewModal().
-				SetText(fmt.Sprintf("Error saving file: %v", err)).
-				AddButtons([]string{"OK"}).
-				SetDoneFunc(func(int, string) {
-					pages.RemovePage("edit_save_error_modal")
-				})
-			pages.AddPage("edit_save_error_modal", errorModal, true, true)
-		} else {
-			reload()
-			pages.RemovePage("edit_modal")
-		}
-	})
-	cancelBtn := tview.NewButton("Cancel").SetSelectedFunc(func() {
-		pages.RemovePage("edit_modal")
-	})
-
-	buttonBar := tview.NewFlex()
-	buttonBar.AddItem(saveBtn, 0, 1, false)
-	buttonBar.AddItem(tview.NewTextView().SetText(" "), 2, 0, false)
-	buttonBar.AddItem(cancelBtn, 0, 1, false)
-
-	// Mode: "normal", "find", "goto"
-	mode := "normal"
-
-	flex := tview.NewFlex().SetDirection(tview.FlexRow)
-	flex.AddItem(createHeader(), 3, 0, false)
-	flex.AddItem(textArea, 0, 1, true)
-	flex.AddItem(buttonBar, 3, 0, false)
-	flex.AddItem(inputField, 0, 0, false) // Initially hidden with height 0
-	flex.AddItem(shortcutsView, 3, 0, false)
-
-	// Function to show input field
-	showInputField := func() {
-		// Change input field height to 3 to make it visible
-		flex.RemoveItem(inputField)
-		flex.RemoveItem(shortcutsView)
-		flex.AddItem(inputField, 3, 0, false)
-		flex.AddItem(shortcutsView, 3, 0, false)
+	err = os.WriteFile(tempPath, originalContent, 0644)
+	if err != nil {
+		os.Remove(tempPath) // cleanup
+		errorModal := tview.NewModal().
+			SetText(fmt.Sprintf("Error writing temporary file: %v", err)).
+			AddButtons([]string{"OK"}).
+			SetDoneFunc(func(int, string) {
+				pages.RemovePage("edit_write_error_modal")
+			})
+		pages.AddPage("edit_write_error_modal", errorModal, true, true)
+		return
 	}
 
-	// Function to hide input field
-	hideInputField := func() {
-		// Change input field height to 0 to hide it
-		flex.RemoveItem(inputField)
-		flex.RemoveItem(shortcutsView)
-		flex.AddItem(inputField, 0, 0, false)
-		flex.AddItem(shortcutsView, 3, 0, false)
-	}
-
-	// Function to scroll TextArea to a specific line
-	scrollToLine := func(textArea *tview.TextArea, line int) {
-		// Use reflection to access the private scrollTo method
-		val := reflect.ValueOf(textArea)
-		method := val.MethodByName("scrollTo")
-		if method.IsValid() {
-			// Call scrollTo(line, true) to center the line
-			args := []reflect.Value{reflect.ValueOf(line), reflect.ValueOf(true)}
-			method.Call(args)
-		}
-	}
-
-	// Function to update the banner
-	updateBanner := func() {
-		switch mode {
-		case "normal":
-			shortcutsView.SetText("Ctrl+S: Save | Ctrl+X: Cancel | Ctrl+Q: Quit | Ctrl+F: Find | Ctrl+G: Go to Line")
-		case "find":
-			shortcutsView.SetText("Find: (Enter to search, Esc to cancel)")
-		case "goto":
-			shortcutsView.SetText("Go to line: (Enter to go, Esc to cancel)")
-		}
-	}
-
-	// Keyboard shortcuts for textArea
-	textArea.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if mode == "normal" {
-			if event.Key() == tcell.KeyCtrlS {
-				// Save
-				newContent := textArea.GetText()
-				err := os.WriteFile(filePath, []byte(newContent), 0644)
-				if err != nil {
-					// Could show error
-				} else {
-					reload()
-					pages.RemovePage("edit_modal")
-				}
-				return nil
-			}
-			if event.Key() == tcell.KeyCtrlX || event.Key() == tcell.KeyCtrlQ {
-				// Cancel
-				pages.RemovePage("edit_modal")
-				return nil
-			}
-			if event.Key() == tcell.KeyCtrlF {
-				// Find
-				mode = "find"
-				inputField.SetLabel("Find: ")
-				inputField.SetText("")
-				updateBanner()
-				showInputField()
-				app.SetFocus(inputField)
-				return nil
-			}
-			if event.Key() == tcell.KeyCtrlG {
-				// Go to line
-				mode = "goto"
-				inputField.SetLabel("Go to line: ")
-				inputField.SetText("")
-				updateBanner()
-				showInputField()
-				app.SetFocus(inputField)
-				return nil
-			}
-		}
-		return event
-	})
-
-	// Input field capture
-	inputField.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyEnter {
-			if mode == "find" {
-				searchText := inputField.GetText()
-				if searchText == "" {
-					mode = "normal"
-					updateBanner()
-					app.SetFocus(textArea)
-					return nil
-				}
-
-				content := textArea.GetText()
-				cursorRow, cursorCol, _, _ := textArea.GetCursor()
-
-				// Find from current position
-				lines := strings.Split(content, "\n")
-				for i := cursorRow; i < len(lines); i++ {
-					line := lines[i]
-					if i == cursorRow {
-						idx := strings.Index(line[cursorCol:], searchText)
-						if idx >= 0 {
-							scrollToLine(textArea, i)
-							mode = "normal"
-							updateBanner()
-							hideInputField()
-							app.SetFocus(textArea)
-							return nil
-						}
-					} else {
-						idx := strings.Index(line, searchText)
-						if idx >= 0 {
-							scrollToLine(textArea, i)
-							mode = "normal"
-							updateBanner()
-							hideInputField()
-							app.SetFocus(textArea)
-							return nil
-						}
-					}
-				}
-
-				// Wrap around from beginning
-				for i := 0; i <= cursorRow; i++ {
-					line := lines[i]
-					idx := strings.Index(line, searchText)
-					if idx >= 0 {
-						scrollToLine(textArea, i)
-						mode = "normal"
-						updateBanner()
-						hideInputField()
-						app.SetFocus(textArea)
-						return nil
-					}
-				}
-
-				// Not found
-				notFoundModal := tview.NewModal().
-					SetText("Text not found.").
+	// Show progress modal
+	progressModal := tview.NewModal().
+		SetText("Editor launched. Press OK when you've finished to apply the changes.").
+		AddButtons([]string{"OK"}).
+		SetDoneFunc(func(int, string) {
+			pages.RemovePage("edit_progress_modal")
+			// Check if file was modified
+			editedContent, err := os.ReadFile(tempPath)
+			if err != nil {
+				os.Remove(tempPath) // cleanup
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Error reading edited file: %v", err)).
 					AddButtons([]string{"OK"}).
 					SetDoneFunc(func(int, string) {
-						pages.RemovePage("find_not_found_modal")
+						pages.RemovePage("edit_read_edited_error_modal")
 					})
-				pages.AddPage("find_not_found_modal", notFoundModal, true, true)
-			} else if mode == "goto" {
-				lineStr := inputField.GetText()
-				lineNum, err := strconv.Atoi(lineStr)
-				if err != nil || lineNum < 1 {
+				pages.AddPage("edit_read_edited_error_modal", errorModal, true, true)
+				return
+			}
+
+			// Check if content changed
+			if string(editedContent) != string(originalContent) {
+				// Save changes back to original file
+				err = os.WriteFile(filePath, editedContent, 0644)
+				if err != nil {
+					os.Remove(tempPath) // cleanup
 					errorModal := tview.NewModal().
-						SetText("Invalid line number.").
+						SetText(fmt.Sprintf("Error saving changes: %v", err)).
 						AddButtons([]string{"OK"}).
 						SetDoneFunc(func(int, string) {
-							pages.RemovePage("goto_error_modal")
+							pages.RemovePage("edit_save_error_modal")
 						})
-					pages.AddPage("goto_error_modal", errorModal, true, true)
-				} else {
-					content := textArea.GetText()
-					lines := strings.Split(content, "\n")
-					if lineNum > len(lines) {
-						lineNum = len(lines)
-					}
-					scrollToLine(textArea, lineNum-1) // 0-based
+					pages.AddPage("edit_save_error_modal", errorModal, true, true)
+					return
 				}
-				mode = "normal"
-				updateBanner()
-				hideInputField()
-				app.SetFocus(textArea)
+				reload() // Refresh the file list
 			}
-			return nil
+
+			// Cleanup temp file
+			os.Remove(tempPath)
+		})
+
+	pages.AddPage("edit_progress_modal", progressModal, true, true)
+
+	// Suspend the TUI and launch the external editor
+	app.Suspend(func() {
+		cmd := exec.Command(editor, tempPath)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err := cmd.Run()
+		if err != nil {
+			// Editor failed to launch or exited with error
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("edit_progress_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Editor failed: %v\n\nYou can try setting the EDITOR environment variable.", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("edit_launch_error_modal")
+						os.Remove(tempPath) // cleanup
+					})
+				pages.AddPage("edit_launch_error_modal", errorModal, true, true)
+			})
 		}
-		if event.Key() == tcell.KeyEsc {
-			mode = "normal"
-			updateBanner()
-			hideInputField()
-			app.SetFocus(textArea)
-			return nil
-		}
-		return event
 	})
+}
 
-	// Initially normal
-	updateBanner()
+func showEditModal(app *tview.Application, pages *tview.Pages, filePath string, reload func()) {
+	// Get available editors
+	availableEditors := getAvailableEditors()
 
-	pages.AddPage("edit_modal", flex, true, true)
-	app.SetFocus(textArea)
+	// If only one editor is available, use it directly
+	if len(availableEditors) == 1 {
+		showEditorWithChoice(app, pages, filePath, reload, availableEditors[0])
+		return
+	}
+
+	// Show editor selection modal
+	var buttons []string
+	for _, editor := range availableEditors {
+		buttons = append(buttons, editor)
+	}
+	buttons = append(buttons, "Cancel")
+
+	editorModal := tview.NewModal().
+		SetText("Multiple editors found. Choose one:").
+		AddButtons(buttons).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			pages.RemovePage("editor_selection_modal")
+			if buttonLabel != "Cancel" && buttonIndex < len(availableEditors) {
+				showEditorWithChoice(app, pages, filePath, reload, buttonLabel)
+			}
+		})
+
+	pages.AddPage("editor_selection_modal", editorModal, true, true)
+}
+
+// getAvailableEditors returns a list of available editors
+func getAvailableEditors() []string {
+	var available []string
+
+	// Check EDITOR environment variable first
+	if editor := os.Getenv("EDITOR"); editor != "" {
+		if _, err := exec.LookPath(editor); err == nil {
+			available = append(available, editor)
+		}
+	}
+
+	// Try common editors
+	editors := []string{"nano", "micro", "vim", "vi", "emacs", "gedit", "kate", "code"}
+
+	for _, editor := range editors {
+		if _, err := exec.LookPath(editor); err == nil {
+			// Avoid duplicates
+			found := false
+			for _, avail := range available {
+				if avail == editor {
+					found = true
+					break
+				}
+			}
+			if !found {
+				available = append(available, editor)
+			}
+		}
+	}
+
+	// Fallback to vi if nothing else is available
+	if len(available) == 0 {
+		available = append(available, "vi")
+	}
+
+	return available
 }
