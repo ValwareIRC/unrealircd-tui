@@ -54,7 +54,7 @@ A powerful terminal-based user interface (TUI) for managing UnrealIRCd IRC serve
 
 2. **Build the application:**
    ```bash
-   go build -o utui main.go
+   go build
    ```
 
 3. **Run the tool:**
