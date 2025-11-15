@@ -1785,6 +1785,15 @@ Features:
 • Remote server administration without direct access
 
 Connect to your UnrealIRCd server's RPC interface for live control.`,
+		"• Configuration": `Browse and preview configuration files.
+
+Features:
+• View all configuration files and folders
+• Preview file contents directly in the interface
+• Navigate through configuration directory structure
+• Quick access to UnrealIRCd configuration files
+
+Easily manage and review your server configuration.`,
 		"• Installation Options": `Manage UnrealIRCd installations.
 
 Features:
@@ -1816,6 +1825,7 @@ Tools for developers working with UnrealIRCd.`}
 
 	list := tview.NewList()
 	list.SetBorder(true).SetBorderColor(tcell.ColorGreen)
+	list.AddItem("• Configuration", "  Browse and preview configuration files", 0, nil)
 	list.AddItem("• Module Manager", "  Manage UnrealIRCd C modules", 0, nil)
 	list.AddItem("• Check for Updates", "  Check for available UnrealIRCd updates", 0, nil)
 	list.AddItem("• Installation Options", "  Manage UnrealIRCd installations", 0, nil)
@@ -1838,6 +1848,8 @@ Tools for developers working with UnrealIRCd.`}
 		if index == lastClickIndex && now.Sub(lastClickTime) < 300*time.Millisecond {
 			// Double-click detected
 			switch mainText {
+			case "• Configuration":
+				ui.ConfigurationMenuPage(app, pages, buildDir)
 			case "• Module Manager":
 				moduleManagerSubmenuPage(app, pages, sourceDir, buildDir)
 			case "• Check for Updates":
@@ -1859,6 +1871,8 @@ Tools for developers working with UnrealIRCd.`}
 	list.SetSelectedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
 		// For Enter key
 		switch mainText {
+		case "• Configuration":
+			ui.ConfigurationMenuPage(app, pages, buildDir)
 		case "• Module Manager":
 			moduleManagerSubmenuPage(app, pages, sourceDir, buildDir)
 		case "• Check for Updates":
@@ -1878,7 +1892,7 @@ Tools for developers working with UnrealIRCd.`}
 
 	// Set initial description
 	if len(descriptions) > 0 {
-		textView.SetText(descriptions["• Module Manager"])
+		textView.SetText(descriptions["• Configuration"])
 	}
 
 	quitBtn := tview.NewButton("Quit").SetSelectedFunc(func() {
