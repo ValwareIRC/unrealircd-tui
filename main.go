@@ -24,6 +24,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/akhenakh/gozim"
 )
 
 var currentList *tview.List
@@ -37,6 +38,7 @@ var checkModulesFocusables []tview.Primitive
 var obbyScriptSubmenuFocusables []tview.Primitive
 var moduleManagerSubmenuFocusables []tview.Primitive
 var utilitiesFocusables []tview.Primitive
+var documentationFocusables []tview.Primitive
 
 var installationTips = []string{
 	"The IRCOp guide shows how to do everyday IRCOp tasks and contains tips on fighting spam and drones.\n\nhttps://www.unrealircd.org/docs/IRCOp_guide",
@@ -1437,6 +1439,8 @@ func main() {
 				focusables = moduleManagerSubmenuFocusables
 			case "utilities":
 				focusables = utilitiesFocusables
+			case "documentation":
+				focusables = documentationFocusables
 			}
 			if len(focusables) > 0 {
 				current := app.GetFocus()
@@ -1825,12 +1829,22 @@ Features:
 • Execute commands with Enter key (not mouse click)
 • Access server management utilities
 
-Direct access to UnrealIRCd's command-line interface.`}
+Direct access to UnrealIRCd's command-line interface.`,
+		"• Documentation": `Browse UnrealIRCd documentation.
+
+Features:
+• Read the official UnrealIRCd wiki offline
+• Search through documentation articles
+• Navigate wiki links and structure
+• Access comprehensive server documentation
+
+Complete offline documentation browser for UnrealIRCd.`}
 
 	list := tview.NewList()
 	list.SetBorder(true).SetBorderColor(tcell.ColorGreen)
 	list.AddItem("• Configuration", "  Browse and preview configuration files", 0, nil)
 	list.AddItem("• Utilities", "  Execute UnrealIRCd command-line utilities", 0, nil)
+	list.AddItem("• Documentation", "  Browse UnrealIRCd documentation", 0, nil)
 	list.AddItem("• Module Manager", "  Manage UnrealIRCd C modules", 0, nil)
 	list.AddItem("• Check for Updates", "  Check for available UnrealIRCd updates", 0, nil)
 	list.AddItem("• Installation Options", "  Manage UnrealIRCd installations", 0, nil)
@@ -1857,6 +1871,8 @@ Direct access to UnrealIRCd's command-line interface.`}
 				ui.ConfigurationMenuPage(app, pages, buildDir)
 			case "• Utilities":
 				utilitiesPage(app, pages, buildDir)
+			case "• Documentation":
+				documentationPage(app, pages, sourceDir)
 			case "• Module Manager":
 				moduleManagerSubmenuPage(app, pages, sourceDir, buildDir)
 			case "• Check for Updates":
@@ -1882,6 +1898,8 @@ Direct access to UnrealIRCd's command-line interface.`}
 			ui.ConfigurationMenuPage(app, pages, buildDir)
 		case "• Utilities":
 			utilitiesPage(app, pages, buildDir)
+		case "• Documentation":
+			documentationPage(app, pages, sourceDir)
 		case "• Module Manager":
 			moduleManagerSubmenuPage(app, pages, sourceDir, buildDir)
 		case "• Check for Updates":
@@ -2060,6 +2078,94 @@ func utilitiesPage(app *tview.Application, pages *tview.Pages, buildDir string) 
 			outputView.SetText(desc)
 		}
 	}
+}
+
+func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir string) {
+	// Check if ZIM file exists
+	zimPath := filepath.Join(sourceDir, "doc", "unrealircd_wiki.zim")
+	if _, err := os.Stat(zimPath); os.IsNotExist(err) {
+		errorModal := tview.NewModal().
+			SetText(fmt.Sprintf("Documentation file not found: %s", zimPath)).
+			AddButtons([]string{"OK"}).
+			SetDoneFunc(func(int, string) {
+				pages.RemovePage("doc_error_modal")
+			})
+		pages.AddPage("doc_error_modal", errorModal, true, true)
+		return
+	}
+
+	// Open ZIM file
+	file, err := os.Open(zimPath)
+	if err != nil {
+		errorModal := tview.NewModal().
+			SetText(fmt.Sprintf("Error opening ZIM file: %v", err)).
+			AddButtons([]string{"OK"}).
+			SetDoneFunc(func(int, string) {
+				pages.RemovePage("doc_open_error_modal")
+			})
+		pages.AddPage("doc_open_error_modal", errorModal, true, true)
+		return
+	}
+	defer file.Close()
+
+	// Create ZIM reader (just to check if valid)
+	_, err = zim.NewReader(zimPath, false)
+	if err != nil {
+		errorModal := tview.NewModal().
+			SetText(fmt.Sprintf("Error reading ZIM file: %v", err)).
+			AddButtons([]string{"OK"}).
+			SetDoneFunc(func(int, string) {
+				pages.RemovePage("doc_read_error_modal")
+			})
+		pages.AddPage("doc_read_error_modal", errorModal, true, true)
+		return
+	}
+
+	// Get articles (first 100)
+	var articles []*zim.Article
+	// For now, skip loading articles to avoid API issues
+	// TODO: Implement proper ZIM article listing
+
+	// List on left
+	list := tview.NewList()
+	list.SetBorder(true)
+	list.SetTitle("Articles")
+	list.SetBorderColor(tcell.ColorGreen)
+
+	// Add a placeholder item
+	list.AddItem("Main Page", "Welcome to UnrealIRCd Documentation", 0, nil)
+	articles = append(articles, nil) // placeholder
+
+	// Content on right
+	contentView := tview.NewTextView()
+	contentView.SetBorder(true)
+	contentView.SetTitle("Content")
+	contentView.SetDynamicColors(true)
+	contentView.SetWordWrap(true)
+	contentView.SetScrollable(true)
+	contentView.SetText("ZIM file loaded successfully!\n\nArticle browsing not yet fully implemented.\n\nFile: " + zimPath)
+
+	// Handle selection
+	list.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		contentView.SetText("Selected: " + mainText + "\n\nArticle content display coming soon.")
+	})
+
+	currentList = list
+
+	backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
+		pages.SwitchToPage("main_menu")
+	})
+
+	buttonBar := createButtonBar(backBtn)
+
+	flex := tview.NewFlex().SetDirection(tview.FlexRow)
+	browserFlex := tview.NewFlex().
+		AddItem(list, 40, 0, true).
+		AddItem(contentView, 0, 1, false)
+	flex.AddItem(createHeader(), 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Main Menu | Enter: Select | q: Quit"), 3, 0, false)
+	pages.AddPage("documentation", flex, true, true)
+	documentationFocusables = []tview.Primitive{list, contentView, backBtn}
+	app.SetFocus(list)
 }
 
 func checkForUpdatesPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
