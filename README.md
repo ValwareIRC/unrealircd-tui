@@ -49,7 +49,7 @@ A powerful terminal-based user interface (TUI) for managing UnrealIRCd IRC serve
 1. **Clone the repository:**
    ```bash
    git clone https://github.com/ValwareIRC/unrealircd-tui.git
-   cd unrealircd-scripts
+   cd unrealircd-tui
    ```
 
 2. **Build the application:**
@@ -120,7 +120,7 @@ The RPC config file contains:
 ## Architecture
 
 ```
-unrealircd-scripts/
+unrealircd-tui/
 ├── main.go              # Main application and TUI logic
 ├── rpc/                 # RPC client and types
 │   ├── client.go        # WebSocket RPC communication
