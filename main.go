@@ -26,6 +26,17 @@ import (
 	"github.com/rivo/tview"
 )
 
+var currentList *tview.List
+
+var mainMenuFocusables []tview.Primitive
+var githubBrowserFocusables []tview.Primitive
+var installedScriptsFocusables []tview.Primitive
+var thirdPartyBrowserFocusables []tview.Primitive
+var editScriptFocusables []tview.Primitive
+var checkModulesFocusables []tview.Primitive
+var obbyScriptSubmenuFocusables []tview.Primitive
+var moduleManagerSubmenuFocusables []tview.Primitive
+
 var installationTips = []string{
 	"The IRCOp guide shows how to do everyday IRCOp tasks and contains tips on fighting spam and drones.\n\nhttps://www.unrealircd.org/docs/IRCOp_guide",
 	"You can use a SSL/TLS certificate fingerprint instead of passwords in places like Oper Blocks and Link Blocks.",
@@ -1298,25 +1309,14 @@ func formatModuleDetails(mod Module) string {
 	return details
 }
 
-var currentList *tview.List
-
-var mainMenuFocusables []tview.Primitive
-var githubBrowserFocusables []tview.Primitive
-var installedScriptsFocusables []tview.Primitive
-var thirdPartyBrowserFocusables []tview.Primitive
-var editScriptFocusables []tview.Primitive
-var checkModulesFocusables []tview.Primitive
-var obbyScriptSubmenuFocusables []tview.Primitive
-var moduleManagerSubmenuFocusables []tview.Primitive
-
 func main() {
 	// Check for command-line arguments
 	if len(os.Args) > 1 {
 		if len(os.Args) == 3 && os.Args[1] == "--dev-test-fleet" {
 			numStr := os.Args[2]
 			numServers, err := strconv.Atoi(numStr)
-			if err != nil || numServers < 2 || numServers > 50 {
-				fmt.Fprintf(os.Stderr, "Error: Invalid number of servers. Must be between 2 and 50.\n")
+			if err != nil || numServers < 2 || numServers > 1000 {
+				fmt.Fprintf(os.Stderr, "Error: Invalid number of servers. Must be between 2 and 1000.\n")
 				fmt.Fprintf(os.Stderr, "Usage: %s --dev-test-fleet <number>\n", os.Args[0])
 				os.Exit(1)
 			}
@@ -1325,7 +1325,7 @@ func main() {
 			return
 		} else {
 			fmt.Fprintf(os.Stderr, "Usage: %s [--dev-test-fleet <number>]\n", os.Args[0])
-			fmt.Fprintf(os.Stderr, "  --dev-test-fleet <number>  Create a test fleet with N servers (2-50)\n")
+			fmt.Fprintf(os.Stderr, "  --dev-test-fleet <number>  Create a test fleet with N servers (2-1000)\n")
 			os.Exit(1)
 		}
 	}
@@ -1794,16 +1794,16 @@ Features:
 • Manage multiple UnrealIRCd versions
 
 Complete installation management for your IRC server.`,
-		"• ObbyScript": `Manage ObbyScript installation and scripts.
+		// "• ObbyScript": `Manage ObbyScript installation and scripts.
 
-Features:
-• Browse and install scripts from GitHub
-• View and edit installed scripts
-• Uninstall ObbyScript completely
-• Automatic configuration management
-• Syntax highlighting and code preview
+		// Features:
+		// • Browse and install scripts from GitHub
+		// • View and edit installed scripts
+		// • Uninstall ObbyScript completely
+		// • Automatic configuration management
+		// • Syntax highlighting and code preview
 
-Extend your IRC server functionality with custom scripts and automation.`,
+		// Extend your IRC server functionality with custom scripts and automation.`,
 		"• Dev Tools": `Developer tools and utilities.
 
 Features:
@@ -1820,7 +1820,7 @@ Tools for developers working with UnrealIRCd.`}
 	list.AddItem("• Check for Updates", "  Check for available UnrealIRCd updates", 0, nil)
 	list.AddItem("• Installation Options", "  Manage UnrealIRCd installations", 0, nil)
 	list.AddItem("• Remote Control (RPC)", "  Control UnrealIRCd server via JSON-RPC API", 0, nil)
-	list.AddItem("• ObbyScript", "  Manage ObbyScript installation and scripts", 0, nil)
+	// list.AddItem("• ObbyScript", "  Manage ObbyScript installation and scripts", 0, nil)
 	list.AddItem("• Dev Tools", "  Developer tools and utilities", 0, nil)
 
 	currentList = list
@@ -1846,8 +1846,8 @@ Tools for developers working with UnrealIRCd.`}
 				installationOptionsPage(app, pages, sourceDir, buildDir)
 			case "• Remote Control (RPC)":
 				ui.RemoteControlMenuPage(app, pages, buildDir)
-			case "• ObbyScript":
-				obbyScriptSubmenuPage(app, pages, sourceDir, buildDir)
+			// case "• ObbyScript":
+			// 	obbyScriptSubmenuPage(app, pages, sourceDir, buildDir)
 			case "• Dev Tools":
 				devToolsSubmenuPage(app, pages, sourceDir, buildDir)
 			}
@@ -1867,8 +1867,8 @@ Tools for developers working with UnrealIRCd.`}
 			installationOptionsPage(app, pages, sourceDir, buildDir)
 		case "• Remote Control (RPC)":
 			ui.RemoteControlMenuPage(app, pages, buildDir)
-		case "• ObbyScript":
-			obbyScriptSubmenuPage(app, pages, sourceDir, buildDir)
+		// case "• ObbyScript":
+		// 	obbyScriptSubmenuPage(app, pages, sourceDir, buildDir)
 		case "• Dev Tools":
 			devToolsSubmenuPage(app, pages, sourceDir, buildDir)
 		}
@@ -3087,16 +3087,16 @@ func testFleetPage(app *tview.Application, pages *tview.Pages) {
 	form.SetBorderColor(tcell.ColorYellow)
 
 	// Add number input field and buttons
-	form.AddInputField("Number of servers (2-50)", "2", 10, func(text string, ch rune) bool {
+	form.AddInputField("Number of servers (2-1000)", "2", 10, func(text string, ch rune) bool {
 		// Only allow digits
 		return (ch >= '0' && ch <= '9') || ch == 0
 	}, nil).
 		AddButton("Create Fleet", func() {
 			numStr := form.GetFormItem(0).(*tview.InputField).GetText()
 			numServers, err := strconv.Atoi(numStr)
-			if err != nil || numServers < 2 || numServers > 50 {
+			if err != nil || numServers < 2 || numServers > 1000 {
 				errorModal := tview.NewModal().
-					SetText("Please enter a valid number between 2 and 50.").
+					SetText("Please enter a valid number between 2 and 1000.").
 					AddButtons([]string{"OK"}).
 					SetDoneFunc(func(int, string) {
 						pages.RemovePage("fleet_error_modal")
@@ -3688,22 +3688,22 @@ func randomString(n int) string {
 func generateSequentialSID(index int) string {
 	// Start from 001 and go sequentially
 	// 001-999, then 0AA-0ZZ, then 100-999, 1AA-1ZZ, etc.
-	
+
 	if index <= 999 {
 		return fmt.Sprintf("%03d", index)
 	}
-	
+
 	// For indices > 999, use base-36 encoding with a prefix
 	// 1000 = 0AA, 1001 = 0AB, etc.
 	adjustedIndex := index - 1000
-	
+
 	// Calculate the prefix (0-9) and suffix (AA-ZZ)
-	prefix := adjustedIndex / 676  // 26*26 = 676
+	prefix := adjustedIndex / 676 // 26*26 = 676
 	suffixIndex := adjustedIndex % 676
-	
+
 	suffix1 := 'A' + rune(suffixIndex/26)
 	suffix2 := 'A' + rune(suffixIndex%26)
-	
+
 	return fmt.Sprintf("%d%c%c", prefix, suffix1, suffix2)
 }
 
