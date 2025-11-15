@@ -2144,14 +2144,14 @@ func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir str
 	}
 	defer zimReader.Close()
 
-	// For now, show basic info
+	// For now, show basic info since Article type is not exported
 	contentView := tview.NewTextView()
 	contentView.SetBorder(true)
 	contentView.SetTitle("Content")
 	contentView.SetDynamicColors(true)
 	contentView.SetWordWrap(true)
 	contentView.SetScrollable(true)
-	contentView.SetText(fmt.Sprintf("ZIM file opened successfully!\n\nArticle count: %d\n\nFull article browsing implementation pending.\n\nFile: %s", zimReader.ArticleCount(), zimPath))
+	contentView.SetText(fmt.Sprintf("ZIM file opened successfully!\n\nArticle count: %d\n\nArticle browsing not implemented due to library API limitations.\n\nFile: %s", zimReader.ArticleCount(), zimPath))
 
 	list := tview.NewList()
 	list.SetBorder(true)
@@ -2160,6 +2160,11 @@ func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir str
 	list.AddItem("Main Page", "Welcome to UnrealIRCd Documentation", 0, nil)
 
 	currentList = list
+
+	// Handle selection
+	list.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		contentView.SetText("Selected: " + mainText + "\n\nArticle content display not implemented.")
+	})
 
 	backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
 		pages.SwitchToPage("main_menu")
