@@ -24,7 +24,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/akhenakh/gozim"
+	"github.com/tim-st/go-zim"
 )
 
 var currentList *tview.List
@@ -2108,47 +2108,56 @@ func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir str
 	}
 	defer file.Close()
 
-	// Create ZIM reader (just to check if valid)
-	_, err = zim.NewReader(zimPath, false)
+	// Create ZIM reader
+	zimReader, err := zim.Open(zimPath)
 	if err != nil {
-		errorModal := tview.NewModal().
-			SetText(fmt.Sprintf("Error reading ZIM file: %v", err)).
-			AddButtons([]string{"OK"}).
-			SetDoneFunc(func(int, string) {
-				pages.RemovePage("doc_read_error_modal")
-			})
-		pages.AddPage("doc_read_error_modal", errorModal, true, true)
+		// Show error in content view instead of modal
+		contentView := tview.NewTextView()
+		contentView.SetBorder(true)
+		contentView.SetTitle("Content")
+		contentView.SetDynamicColors(true)
+		contentView.SetWordWrap(true)
+		contentView.SetScrollable(true)
+		contentView.SetText(fmt.Sprintf("Error reading ZIM file: %v\n\nThe ZIM file version may not be supported by the current library.\n\nFile: %s", err, zimPath))
+
+		list := tview.NewList()
+		list.SetBorder(true)
+		list.SetTitle("Articles")
+		list.SetBorderColor(tcell.ColorGreen)
+		list.AddItem("Error", "Failed to load articles", 0, nil)
+
+		backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
+			pages.SwitchToPage("main_menu")
+		})
+
+		buttonBar := createButtonBar(backBtn)
+
+		flex := tview.NewFlex().SetDirection(tview.FlexRow)
+		browserFlex := tview.NewFlex().
+			AddItem(list, 40, 0, true).
+			AddItem(contentView, 0, 1, false)
+		flex.AddItem(createHeader(), 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Main Menu | q: Quit"), 3, 0, false)
+		pages.AddPage("documentation", flex, true, true)
+		documentationFocusables = []tview.Primitive{list, contentView, backBtn}
+		app.SetFocus(list)
 		return
 	}
+	defer zimReader.Close()
 
-	// Get articles (first 100)
-	var articles []*zim.Article
-	// For now, skip loading articles to avoid API issues
-	// TODO: Implement proper ZIM article listing
-
-	// List on left
-	list := tview.NewList()
-	list.SetBorder(true)
-	list.SetTitle("Articles")
-	list.SetBorderColor(tcell.ColorGreen)
-
-	// Add a placeholder item
-	list.AddItem("Main Page", "Welcome to UnrealIRCd Documentation", 0, nil)
-	articles = append(articles, nil) // placeholder
-
-	// Content on right
+	// For now, show basic info
 	contentView := tview.NewTextView()
 	contentView.SetBorder(true)
 	contentView.SetTitle("Content")
 	contentView.SetDynamicColors(true)
 	contentView.SetWordWrap(true)
 	contentView.SetScrollable(true)
-	contentView.SetText("ZIM file loaded successfully!\n\nArticle browsing not yet fully implemented.\n\nFile: " + zimPath)
+	contentView.SetText(fmt.Sprintf("ZIM file opened successfully!\n\nArticle count: %d\n\nFull article browsing implementation pending.\n\nFile: %s", zimReader.ArticleCount(), zimPath))
 
-	// Handle selection
-	list.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
-		contentView.SetText("Selected: " + mainText + "\n\nArticle content display coming soon.")
-	})
+	list := tview.NewList()
+	list.SetBorder(true)
+	list.SetTitle("Articles")
+	list.SetBorderColor(tcell.ColorGreen)
+	list.AddItem("Main Page", "Welcome to UnrealIRCd Documentation", 0, nil)
 
 	currentList = list
 
@@ -2162,10 +2171,15 @@ func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir str
 	browserFlex := tview.NewFlex().
 		AddItem(list, 40, 0, true).
 		AddItem(contentView, 0, 1, false)
-	flex.AddItem(createHeader(), 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Main Menu | Enter: Select | q: Quit"), 3, 0, false)
+	flex.AddItem(createHeader(), 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Main Menu | q: Quit"), 3, 0, false)
 	pages.AddPage("documentation", flex, true, true)
 	documentationFocusables = []tview.Primitive{list, contentView, backBtn}
 	app.SetFocus(list)
+
+	// Handle selection
+	list.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		contentView.SetText("Selected: " + mainText + "\n\nArticle content display coming soon.")
+	})
 }
 
 func checkForUpdatesPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
