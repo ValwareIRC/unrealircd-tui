@@ -261,14 +261,14 @@ func showConfigurationOptions(app *tview.Application, pages *tview.Pages, confDi
 		cmd := exec.Command("./unrealircd", "configtest")
 		cmd.Dir = buildDir // Run from the build directory where unrealircd binary should be
 		output, err := cmd.CombinedOutput()
-		
+
 		var resultText string
 		if err != nil {
 			resultText = fmt.Sprintf("Config test failed:\n\nError: %v\n\nOutput:\n%s", err, string(output))
 		} else {
 			resultText = fmt.Sprintf("Config test passed!\n\nOutput:\n%s", string(output))
 		}
-		
+
 		// Show result in a modal
 		resultModal := tview.NewModal().
 			SetText(resultText).

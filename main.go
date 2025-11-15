@@ -36,6 +36,7 @@ var editScriptFocusables []tview.Primitive
 var checkModulesFocusables []tview.Primitive
 var obbyScriptSubmenuFocusables []tview.Primitive
 var moduleManagerSubmenuFocusables []tview.Primitive
+var utilitiesFocusables []tview.Primitive
 
 var installationTips = []string{
 	"The IRCOp guide shows how to do everyday IRCOp tasks and contains tips on fighting spam and drones.\n\nhttps://www.unrealircd.org/docs/IRCOp_guide",
@@ -1442,6 +1443,8 @@ func main() {
 				focusables = obbyScriptSubmenuFocusables
 			case "module_manager_submenu":
 				focusables = moduleManagerSubmenuFocusables
+			case "utilities":
+				focusables = utilitiesFocusables
 			}
 			if len(focusables) > 0 {
 				current := app.GetFocus()
@@ -1821,7 +1824,16 @@ Features:
 • Debug and troubleshooting tools
 • Development utilities and helpers
 
-Tools for developers working with UnrealIRCd.`}
+Tools for developers working with UnrealIRCd.`,
+		"• Utilities": `Execute UnrealIRCd command-line utilities.
+
+Features:
+• Run ./unrealircd commands like rehash, mkpasswd, upgrade
+• View command output in real-time
+• Execute commands with Enter key (not mouse click)
+• Access server management utilities
+
+Direct access to UnrealIRCd's command-line interface.`}
 
 	list := tview.NewList()
 	list.SetBorder(true).SetBorderColor(tcell.ColorGreen)
@@ -1832,6 +1844,7 @@ Tools for developers working with UnrealIRCd.`}
 	list.AddItem("• Remote Control (RPC)", "  Control UnrealIRCd server via JSON-RPC API", 0, nil)
 	// list.AddItem("• ObbyScript", "  Manage ObbyScript installation and scripts", 0, nil)
 	list.AddItem("• Dev Tools", "  Developer tools and utilities", 0, nil)
+	list.AddItem("• Utilities", "  Execute UnrealIRCd command-line utilities", 0, nil)
 
 	currentList = list
 
@@ -1862,6 +1875,8 @@ Tools for developers working with UnrealIRCd.`}
 			// 	obbyScriptSubmenuPage(app, pages, sourceDir, buildDir)
 			case "• Dev Tools":
 				devToolsSubmenuPage(app, pages, sourceDir, buildDir)
+			case "• Utilities":
+				utilitiesPage(app, pages, buildDir)
 			}
 		}
 		lastClickIndex = index
@@ -1885,6 +1900,8 @@ Tools for developers working with UnrealIRCd.`}
 		// 	obbyScriptSubmenuPage(app, pages, sourceDir, buildDir)
 		case "• Dev Tools":
 			devToolsSubmenuPage(app, pages, sourceDir, buildDir)
+		case "• Utilities":
+			utilitiesPage(app, pages, buildDir)
 		}
 	})
 
@@ -1909,6 +1926,148 @@ Tools for developers working with UnrealIRCd.`}
 	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
 	pages.AddPage("main_menu", flex, true, true)
 	mainMenuFocusables = []tview.Primitive{list, textView, quitBtn}
+}
+
+func utilitiesPage(app *tview.Application, pages *tview.Pages, buildDir string) {
+	// List of utilities on the left
+	list := tview.NewList()
+	list.SetBorder(true)
+	list.SetTitle("UnrealIRCd Utilities")
+	list.SetBorderColor(tcell.ColorGreen)
+
+	// Output text view on the right
+	outputView := tview.NewTextView()
+	outputView.SetBorder(true)
+	outputView.SetTitle("Command Output")
+	outputView.SetDynamicColors(true)
+	outputView.SetWordWrap(true)
+	outputView.SetScrollable(true)
+
+	// Descriptions for utilities
+	descriptions := map[string]string{
+		"configtest":   "Test the configuration file for syntax errors and validity.\n\nThis command checks if your unrealircd.conf and other configuration files are properly formatted and contain no errors before starting the server.",
+		"start":        "Start the IRC Server.\n\nLaunches the UnrealIRCd daemon. Make sure the configuration is tested first with configtest.",
+		"stop":         "Stop (kill) the IRC Server.\n\nGracefully shuts down the running UnrealIRCd process. All users will be disconnected.",
+		"rehash":       "Reload the configuration file.\n\nReloads the configuration without restarting the server. Useful for applying configuration changes while the server is running.",
+		"reloadtls":    "Reload the SSL/TLS certificates.\n\nReloads SSL/TLS certificates and keys without restarting the server. Useful when certificates have been renewed.",
+		"restart":      "Restart the IRC Server (stop+start).\n\nStops the server and starts it again. All users will be disconnected during the restart.",
+		"status":       "Show current status of the IRC Server.\n\nDisplays information about whether the server is running, PID, uptime, and basic statistics.",
+		"module-status": "Show all currently loaded modules.\n\nLists all modules that are currently loaded in the running server, including core and third-party modules.",
+		"version":      "Display the UnrealIRCd version.\n\nShows the version number, build date, and other version information of the installed UnrealIRCd.",
+		"genlinkblock": "Generate link { } block for the other side.\n\nCreates a sample link block configuration that can be used to connect to another IRC server.",
+		"gencloak":     "Display 3 random cloak keys.\n\nGenerates random cloak keys that can be used in the configuration for hostname cloaking.",
+		"spkifp":       "Display SPKI Fingerprint.\n\nShows the SPKI (Subject Public Key Info) fingerprint of the server's SSL/TLS certificate.",
+	}
+
+	// Add utility commands
+	utilities := []string{
+		"configtest",
+		"start",
+		"stop",
+		"rehash",
+		"reloadtls",
+		"restart",
+		"status",
+		"module-status",
+		"version",
+		"genlinkblock",
+		"gencloak",
+		"spkifp",
+	}
+	for _, util := range utilities {
+		// Get short description from the map or default
+		shortDesc := "Execute " + util
+		if desc, ok := descriptions[util]; ok {
+			// Take first line or shorten
+			lines := strings.Split(desc, "\n")
+			if len(lines) > 0 {
+				shortDesc = lines[0]
+			}
+		}
+		list.AddItem(util, shortDesc, 0, nil)
+	}
+
+	currentList = list
+
+	// Update description when selection changes
+	list.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		if desc, ok := descriptions[mainText]; ok {
+			outputView.SetText(desc)
+		} else {
+			outputView.SetText("No description available.")
+		}
+	})
+
+	// Handle Enter key press to execute command (not on click)
+	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEnter {
+			index := list.GetCurrentItem()
+			if index >= 0 && index < len(utilities) {
+				command := utilities[index]
+				// Clear previous output
+				outputView.Clear()
+				// Execute the command
+				go func() {
+					cmd := exec.Command("./unrealircd", command)
+					cmd.Dir = buildDir
+					output, err := cmd.CombinedOutput()
+					app.QueueUpdateDraw(func() {
+						if err != nil {
+							fmt.Fprintf(outputView, "Error executing %s:\n%s\n\n%s", command, err.Error(), string(output))
+						} else {
+							fmt.Fprintf(outputView, "Output of ./unrealircd %s:\n\n%s", command, string(output))
+						}
+					})
+				}()
+			}
+			return nil // Consume the event
+		}
+		return event
+	})
+
+	backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
+		pages.SwitchToPage("main_menu")
+	})
+
+	runBtn := tview.NewButton("Run").SetSelectedFunc(func() {
+		index := list.GetCurrentItem()
+		if index >= 0 && index < len(utilities) {
+			command := utilities[index]
+			// Clear previous output
+			outputView.Clear()
+			// Execute the command
+			go func() {
+				cmd := exec.Command("./unrealircd", command)
+				cmd.Dir = buildDir
+				output, err := cmd.CombinedOutput()
+				app.QueueUpdateDraw(func() {
+					if err != nil {
+						fmt.Fprintf(outputView, "Error executing %s:\n%s\n\n%s", command, err.Error(), string(output))
+					} else {
+						fmt.Fprintf(outputView, "Output of ./unrealircd %s:\n\n%s", command, string(output))
+					}
+				})
+			}()
+		}
+	})
+
+	buttonBar := createButtonBar(backBtn, runBtn)
+
+	flex := tview.NewFlex().SetDirection(tview.FlexRow)
+	browserFlex := tview.NewFlex().
+		AddItem(list, 40, 0, true).
+		AddItem(outputView, 0, 1, false)
+	flex.AddItem(createHeader(), 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("ESC: Main Menu | Enter: Execute Command | q: Quit"), 3, 0, false)
+	pages.AddPage("utilities", flex, true, true)
+	utilitiesFocusables = []tview.Primitive{list, outputView, backBtn, runBtn}
+	app.SetFocus(list)
+
+	// Set initial description
+	if len(utilities) > 0 {
+		if desc, ok := descriptions[utilities[0]]; ok {
+			outputView.SetText(desc)
+		}
+	}
 }
 
 func checkForUpdatesPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
