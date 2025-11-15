@@ -29,11 +29,11 @@ func ConfigurationMenuPage(app *tview.Application, pages *tview.Pages, buildDir 
 	}
 
 	flex := tview.NewFlex().SetDirection(tview.FlexRow)
-	showConfigurationOptions(app, pages, confDir, flex)
+	showConfigurationOptions(app, pages, confDir, buildDir, flex)
 	pages.AddPage("configuration_menu", flex, true, true)
 }
 
-func showConfigurationOptions(app *tview.Application, pages *tview.Pages, confDir string, flex *tview.Flex) {
+func showConfigurationOptions(app *tview.Application, pages *tview.Pages, confDir string, buildDir string, flex *tview.Flex) {
 	currentPath := confDir
 
 	// Left: File/Folder list
@@ -256,6 +256,28 @@ func showConfigurationOptions(app *tview.Application, pages *tview.Pages, confDi
 	newFolderBtn := tview.NewButton("New Folder").SetSelectedFunc(func() {
 		showNewItemModal(app, pages, currentPath, false, reload)
 	})
+	testConfigBtn := tview.NewButton("Test Config").SetSelectedFunc(func() {
+		// Run ./unrealircd configtest and capture output
+		cmd := exec.Command("./unrealircd", "configtest")
+		cmd.Dir = buildDir // Run from the build directory where unrealircd binary should be
+		output, err := cmd.CombinedOutput()
+		
+		var resultText string
+		if err != nil {
+			resultText = fmt.Sprintf("Config test failed:\n\nError: %v\n\nOutput:\n%s", err, string(output))
+		} else {
+			resultText = fmt.Sprintf("Config test passed!\n\nOutput:\n%s", string(output))
+		}
+		
+		// Show result in a modal
+		resultModal := tview.NewModal().
+			SetText(resultText).
+			AddButtons([]string{"OK"}).
+			SetDoneFunc(func(int, string) {
+				pages.RemovePage("config_test_result_modal")
+			})
+		pages.AddPage("config_test_result_modal", resultModal, true, true)
+	})
 	backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
 		pages.RemovePage("configuration_menu")
 	})
@@ -270,6 +292,8 @@ func showConfigurationOptions(app *tview.Application, pages *tview.Pages, confDi
 	buttonBar.AddItem(newFileBtn, 0, 1, false)
 	buttonBar.AddItem(tview.NewTextView().SetText(" "), 2, 0, false)
 	buttonBar.AddItem(newFolderBtn, 0, 1, false)
+	buttonBar.AddItem(tview.NewTextView().SetText(" "), 2, 0, false)
+	buttonBar.AddItem(testConfigBtn, 0, 1, false)
 
 	// Layout
 	contentFlex := tview.NewFlex()
