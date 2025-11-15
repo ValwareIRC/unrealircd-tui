@@ -1838,13 +1838,13 @@ Direct access to UnrealIRCd's command-line interface.`}
 	list := tview.NewList()
 	list.SetBorder(true).SetBorderColor(tcell.ColorGreen)
 	list.AddItem("• Configuration", "  Browse and preview configuration files", 0, nil)
+	list.AddItem("• Utilities", "  Execute UnrealIRCd command-line utilities", 0, nil)
 	list.AddItem("• Module Manager", "  Manage UnrealIRCd C modules", 0, nil)
 	list.AddItem("• Check for Updates", "  Check for available UnrealIRCd updates", 0, nil)
 	list.AddItem("• Installation Options", "  Manage UnrealIRCd installations", 0, nil)
 	list.AddItem("• Remote Control (RPC)", "  Control UnrealIRCd server via JSON-RPC API", 0, nil)
 	// list.AddItem("• ObbyScript", "  Manage ObbyScript installation and scripts", 0, nil)
 	list.AddItem("• Dev Tools", "  Developer tools and utilities", 0, nil)
-	list.AddItem("• Utilities", "  Execute UnrealIRCd command-line utilities", 0, nil)
 
 	currentList = list
 
@@ -1863,6 +1863,8 @@ Direct access to UnrealIRCd's command-line interface.`}
 			switch mainText {
 			case "• Configuration":
 				ui.ConfigurationMenuPage(app, pages, buildDir)
+			case "• Utilities":
+				utilitiesPage(app, pages, buildDir)
 			case "• Module Manager":
 				moduleManagerSubmenuPage(app, pages, sourceDir, buildDir)
 			case "• Check for Updates":
@@ -1875,8 +1877,6 @@ Direct access to UnrealIRCd's command-line interface.`}
 			// 	obbyScriptSubmenuPage(app, pages, sourceDir, buildDir)
 			case "• Dev Tools":
 				devToolsSubmenuPage(app, pages, sourceDir, buildDir)
-			case "• Utilities":
-				utilitiesPage(app, pages, buildDir)
 			}
 		}
 		lastClickIndex = index
@@ -1888,6 +1888,8 @@ Direct access to UnrealIRCd's command-line interface.`}
 		switch mainText {
 		case "• Configuration":
 			ui.ConfigurationMenuPage(app, pages, buildDir)
+		case "• Utilities":
+			utilitiesPage(app, pages, buildDir)
 		case "• Module Manager":
 			moduleManagerSubmenuPage(app, pages, sourceDir, buildDir)
 		case "• Check for Updates":
@@ -1900,8 +1902,6 @@ Direct access to UnrealIRCd's command-line interface.`}
 		// 	obbyScriptSubmenuPage(app, pages, sourceDir, buildDir)
 		case "• Dev Tools":
 			devToolsSubmenuPage(app, pages, sourceDir, buildDir)
-		case "• Utilities":
-			utilitiesPage(app, pages, buildDir)
 		}
 	})
 
