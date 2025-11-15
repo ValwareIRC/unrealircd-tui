@@ -25,6 +25,14 @@ func createHeader() *tview.TextView {
 	return header
 }
 
+func CreateFooter(shortcuts string) *tview.TextView {
+	footer := tview.NewTextView()
+	footer.SetText(shortcuts)
+	footer.SetTextAlign(tview.AlignCenter)
+	footer.SetBorder(true)
+	return footer
+}
+
 func parseLogTimestamp(timestampStr string) time.Time {
 	// Debug: log the timestamp string we're trying to parse
 	debugFile, _ := os.OpenFile("/tmp/debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)

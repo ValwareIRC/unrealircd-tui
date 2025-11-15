@@ -488,7 +488,7 @@ func checkModulesPage(app *tview.Application, pages *tview.Pages, buildDir, sour
 	browserFlex := tview.NewFlex().
 		AddItem(list, 40, 0, true).
 		AddItem(textView, 0, 1, false)
-	flex.AddItem(createHeader(), 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("ESC: Main Menu | q: Quit"), 3, 0, false)
+	flex.AddItem(createHeader(), 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Main Menu | q: Quit"), 3, 0, false)
 	pages.AddPage("check_modules", flex, true, true)
 	checkModulesFocusables = []tview.Primitive{list, textView, loadUnloadBtn, uninstallBtn, deleteBtn, backBtn}
 }
@@ -889,14 +889,6 @@ func getInstalledScripts(buildDir string) ([]string, error) {
 		}
 	}
 	return scripts, nil
-}
-
-func createFooter(shortcuts string) *tview.TextView {
-	footer := tview.NewTextView()
-	footer.SetText(shortcuts)
-	footer.SetTextAlign(tview.AlignCenter)
-	footer.SetBorder(true)
-	return footer
 }
 
 func createHeader() *tview.TextView {
@@ -1495,7 +1487,7 @@ func selectSourcePage(app *tview.Application, pages *tview.Pages, sourceDirs []s
 	buttonBar := createButtonBar(selectBtn)
 
 	contentFlex := tview.NewFlex().SetDirection(tview.FlexRow)
-	contentFlex.AddItem(createHeader(), 3, 0, false).AddItem(list, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("Enter: Select | q: Quit"), 3, 0, false)
+	contentFlex.AddItem(createHeader(), 3, 0, false).AddItem(list, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("Enter: Select | q: Quit"), 3, 0, false)
 
 	// Auto-size height based on content
 	contentHeight := len(sourceDirs) + 8 // items + title + buttons + footer + padding
@@ -1923,7 +1915,7 @@ Direct access to UnrealIRCd's command-line interface.`}
 	browserFlex := tview.NewFlex().
 		AddItem(list, 40, 0, true).
 		AddItem(textView, 0, 1, false)
-	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
+	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
 	pages.AddPage("main_menu", flex, true, true)
 	mainMenuFocusables = []tview.Primitive{list, textView, quitBtn}
 }
@@ -2057,7 +2049,7 @@ func utilitiesPage(app *tview.Application, pages *tview.Pages, buildDir string) 
 	browserFlex := tview.NewFlex().
 		AddItem(list, 40, 0, true).
 		AddItem(outputView, 0, 1, false)
-	flex.AddItem(createHeader(), 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("ESC: Main Menu | Enter: Execute Command | q: Quit"), 3, 0, false)
+	flex.AddItem(createHeader(), 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Main Menu | Enter: Execute Command | q: Quit"), 3, 0, false)
 	pages.AddPage("utilities", flex, true, true)
 	utilitiesFocusables = []tview.Primitive{list, outputView, backBtn, runBtn}
 	app.SetFocus(list)
@@ -3048,7 +3040,7 @@ Use this when you want to stop using scripts entirely.`}
 	browserFlex := tview.NewFlex().
 		AddItem(list, 40, 0, true).
 		AddItem(textView, 0, 1, false)
-	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
+	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
 	pages.AddPage("obby_script_submenu", flex, true, true)
 	obbyScriptSubmenuFocusables = []tview.Primitive{list, textView, backBtn}
 }
@@ -3145,7 +3137,7 @@ Development resources and documentation for UnrealIRCd.`}
 	browserFlex := tview.NewFlex().
 		AddItem(list, 40, 0, true).
 		AddItem(textView, 0, 1, false)
-	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
+	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
 	pages.AddPage("dev_tools_submenu", flex, true, true)
 	app.SetFocus(list)
 }
@@ -3248,7 +3240,7 @@ Control your test fleet servers with ease.`}
 	flex.AddItem(header, 3, 0, false).
 		AddItem(topFlex, 0, 1, true).
 		AddItem(buttonBar, 3, 0, false).
-		AddItem(createFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
+		AddItem(ui.CreateFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
 	pages.AddPage("tests_submenu", flex, true, true)
 	app.SetFocus(list)
 }
@@ -3292,7 +3284,7 @@ func testFleetPage(app *tview.Application, pages *tview.Pages) {
 	flex.AddItem(tview.NewTextView(), 1, 0, false) // Spacer
 	flex.AddItem(form, 10, 0, true)
 	flex.AddItem(tview.NewTextView(), 1, 0, false) // Spacer
-	flex.AddItem(createFooter("Enter: Select | Tab: Next Field | Esc: Cancel"), 3, 0, false)
+	flex.AddItem(ui.CreateFooter("Enter: Select | Tab: Next Field | Esc: Cancel"), 3, 0, false)
 
 	centeredFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(tview.NewTextView(), 0, 1, false).
@@ -3388,7 +3380,7 @@ func manageFleetPage(app *tview.Application, pages *tview.Pages) {
 
 	// Layout
 	contentFlex := tview.NewFlex().SetDirection(tview.FlexRow)
-	contentFlex.AddItem(createHeader(), 3, 0, false).AddItem(list, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("Enter: Select fleet | d: Delete Fleet | b: Back"), 3, 0, false)
+	contentFlex.AddItem(createHeader(), 3, 0, false).AddItem(list, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("Enter: Select fleet | d: Delete Fleet | b: Back"), 3, 0, false)
 
 	centeredFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(tview.NewTextView(), 0, 1, false).
@@ -4961,7 +4953,7 @@ Completely remove unwanted UnrealIRCd installations.`}
 	browserFlex := tview.NewFlex().
 		AddItem(list, 40, 0, true).
 		AddItem(textView, 0, 1, false)
-	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("Double-click or Enter: Select | b: Back"), 3, 0, false)
+	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("Double-click or Enter: Select | b: Back"), 3, 0, false)
 	pages.AddPage("installation_options", flex, true, true)
 	app.SetFocus(list)
 }
@@ -5088,7 +5080,7 @@ func uninstallUnrealIRCdPage(app *tview.Application, pages *tview.Pages) {
 
 	// Layout
 	contentFlex := tview.NewFlex().SetDirection(tview.FlexRow)
-	contentFlex.AddItem(createHeader(), 3, 0, false).AddItem(list, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("Enter: Select installation to uninstall | b: Back"), 3, 0, false)
+	contentFlex.AddItem(createHeader(), 3, 0, false).AddItem(list, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("Enter: Select installation to uninstall | b: Back"), 3, 0, false)
 
 	centeredFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(tview.NewTextView(), 0, 1, false).
@@ -5204,7 +5196,7 @@ Install your own custom modules directly into the source tree.`}
 	browserFlex := tview.NewFlex().
 		AddItem(list, 40, 0, true).
 		AddItem(textView, 0, 1, false)
-	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
+	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
 	pages.AddPage("module_manager_submenu", flex, true, true)
 	moduleManagerSubmenuFocusables = []tview.Primitive{list, textView, backBtn}
 }
@@ -5306,7 +5298,7 @@ func uploadCustomModulePage(app *tview.Application, pages *tview.Pages, sourceDi
 	flex.AddItem(header, 3, 0, false).
 		AddItem(textArea, 0, 1, true).
 		AddItem(buttonBar, 3, 0, false).
-		AddItem(createFooter("ESC: Back | Ctrl+S: Save | q: Quit"), 3, 0, false)
+		AddItem(ui.CreateFooter("ESC: Back | Ctrl+S: Save | q: Quit"), 3, 0, false)
 
 	pages.AddPage("upload_custom_module", flex, true, true)
 	app.SetFocus(textArea)
@@ -5451,7 +5443,7 @@ func githubBrowserPage(app *tview.Application, pages *tview.Pages, buildDir stri
 	browserFlex := tview.NewFlex().
 		AddItem(list, 40, 0, true).
 		AddItem(textView, 0, 1, false)
-	flex.AddItem(createHeader(), 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("ESC: Main Menu | Enter: Select | q: Quit"), 3, 0, false)
+	flex.AddItem(createHeader(), 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Main Menu | Enter: Select | q: Quit"), 3, 0, false)
 	pages.AddPage("github_browser", flex, true, true)
 	githubBrowserFocusables = []tview.Primitive{list, textView, backBtn, installBtn}
 }
@@ -5590,7 +5582,7 @@ func thirdPartyBrowserPage(app *tview.Application, pages *tview.Pages, sourceDir
 	browserFlex := tview.NewFlex().
 		AddItem(list, 80, 0, true).
 		AddItem(textView, 0, 1, false)
-	flex.AddItem(createHeader(), 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("ESC: Main Menu | Enter: Select | q: Quit"), 3, 0, false)
+	flex.AddItem(createHeader(), 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Main Menu | Enter: Select | q: Quit"), 3, 0, false)
 	pages.AddPage("third_party_browser", flex, true, true)
 	thirdPartyBrowserFocusables = []tview.Primitive{list, textView, backBtn, installBtn}
 }
@@ -5691,7 +5683,7 @@ func installedScriptsPage(app *tview.Application, pages *tview.Pages, buildDir s
 	scriptsFlex := tview.NewFlex().
 		AddItem(list, 40, 0, true).
 		AddItem(textView, 0, 1, false)
-	flex.AddItem(createHeader(), 3, 0, false).AddItem(scriptsFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("ESC: Main Menu | Enter: Select | q: Quit"), 3, 0, false)
+	flex.AddItem(createHeader(), 3, 0, false).AddItem(scriptsFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Main Menu | Enter: Select | q: Quit"), 3, 0, false)
 	pages.AddPage("installed_scripts", flex, true, true)
 	installedScriptsFocusables = []tview.Primitive{list, textView, backBtn, editBtn, uninstallBtn}
 }
@@ -5817,7 +5809,7 @@ func editScriptPage(app *tview.Application, pages *tview.Pages, buildDir, script
 	buttonBar := createButtonBar(saveBtn, previewBtn, cancelBtn)
 
 	flex := tview.NewFlex().SetDirection(tview.FlexRow)
-	flex.AddItem(createHeader(), 3, 0, false).AddItem(textArea, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(createFooter("Ctrl+S: Save | Ctrl+X: Cancel | ESC: Cancel"), 3, 0, false)
+	flex.AddItem(createHeader(), 3, 0, false).AddItem(textArea, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("Ctrl+S: Save | Ctrl+X: Cancel | ESC: Cancel"), 3, 0, false)
 	pages.AddPage("edit_script", flex, true, true)
 	editScriptFocusables = []tview.Primitive{textArea, saveBtn, previewBtn, cancelBtn}
 	app.SetFocus(textArea)

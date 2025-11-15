@@ -303,6 +303,7 @@ func showConfigurationOptions(app *tview.Application, pages *tview.Pages, confDi
 	flex.AddItem(createHeader(), 3, 0, false)
 	flex.AddItem(contentFlex, 0, 1, true)
 	flex.AddItem(buttonBar, 3, 0, false)
+	flex.AddItem(CreateFooter("ESC: Main Menu | Enter: Edit | q: Quit"), 3, 0, false)
 }
 
 func loadConfigurationList(list *tview.List, previewView *tview.TextView, currentPath, rootPath string, navigate func(string)) {
