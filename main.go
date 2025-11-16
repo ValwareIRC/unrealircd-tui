@@ -2145,6 +2145,7 @@ func htmlToText(htmlContent string) string {
 func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir string) {
 	// Check if ZIM file exists
 	zimPath := filepath.Join(sourceDir, "doc", "unrealircd_wiki.zim")
+	fmt.Printf("DEBUG: Looking for ZIM file at: %s\n", zimPath)
 	if _, err := os.Stat(zimPath); os.IsNotExist(err) {
 		errorModal := tview.NewModal().
 			SetText(fmt.Sprintf("Documentation file not found: %s", zimPath)).
@@ -2206,6 +2207,8 @@ func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir str
 	}
 	defer zimReader.Close()
 
+	fmt.Printf("DEBUG: ZIM file opened. ArticleCount(): %d\n", zimReader.ArticleCount())
+
 	// For now, show basic info since Article type is not exported
 	contentView := tview.NewTextView()
 	contentView.SetBorder(true)
@@ -2234,25 +2237,18 @@ func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir str
 		}
 	}
 
-	// Get articles from namespaces that contain actual browsable content
+	// Try a different approach - iterate through all articles by position
 	var allArticles []zim.DirectoryEntry
+	articleCount := int(zimReader.ArticleCount())
 	
-	// Only include namespaces with actual articles/pages, not metadata
-	namespaces := []zim.Namespace{
-		zim.NamespaceArticles,      // 'A' - actual articles
-		zim.NamespaceLayout,        // '-' - layout pages
-	}
-	
-	totalEntries := 0
-	for _, ns := range namespaces {
-		entries := zimReader.EntriesWithNamespace(ns, 500) // Get more entries
-		for _, entry := range entries {
-			totalEntries++
-			// Only include actual articles that have content
-			if entry.IsArticle() && len(entry.Title()) > 0 {
-				allArticles = append(allArticles, entry)
-			}
+	for i := 0; i < articleCount && i < 100; i++ { // Limit to 100 for safety
+		entry, err := zimReader.EntryAtTitlePosition(uint32(i))
+		if err != nil {
+			continue
 		}
+		
+		// Include all articles, even if content can't be read
+		allArticles = append(allArticles, entry)
 	}
 
 	// Sort articles by title for better organization
@@ -2269,7 +2265,7 @@ func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir str
 	})
 
 	// Limit the number of articles to display for performance
-	maxArticles := 100
+	maxArticles := 50 // Reduced for testing
 	if len(allArticles) > maxArticles {
 		allArticles = allArticles[:maxArticles]
 	}
@@ -2328,7 +2324,7 @@ func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir str
 					contentView.SetText(fmt.Sprintf("Error reading article content: %v", err))
 				}
 			} else {
-				contentView.SetText(fmt.Sprintf("Error getting article reader: %v", err))
+				contentView.SetText(fmt.Sprintf("Article content not available.\n\nTitle: %s\nURL: %s\n\nThis ZIM file version may not be fully supported by the current library.\nError: %v", string(selectedArticle.Title()), string(selectedArticle.URL()), err))
 			}
 		} else {
 			// Show main page content
