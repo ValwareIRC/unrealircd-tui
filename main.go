@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"golang.org/x/net/html"
 	"io"
 	"net/http"
 	"os"
@@ -2080,6 +2081,67 @@ func utilitiesPage(app *tview.Application, pages *tview.Pages, buildDir string) 
 	}
 }
 
+func htmlToText(htmlContent string) string {
+	doc, err := html.Parse(strings.NewReader(htmlContent))
+	if err != nil {
+		return htmlContent // fallback to original if parsing fails
+	}
+
+	var text strings.Builder
+	var extractText func(*html.Node, bool)
+	extractText = func(n *html.Node, inPre bool) {
+		if n.Type == html.TextNode {
+			if inPre {
+				text.WriteString(n.Data)
+			} else {
+				// Normalize whitespace
+				data := strings.ReplaceAll(n.Data, "\t", " ")
+				data = regexp.MustCompile(`\s+`).ReplaceAllString(data, " ")
+				text.WriteString(data)
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			extractText(c, inPre || (n.Type == html.ElementNode && n.Data == "pre"))
+		}
+		// Add formatting for block elements
+		if n.Type == html.ElementNode {
+			switch n.Data {
+			case "p":
+				text.WriteString("\n\n")
+			case "div":
+				text.WriteString("\n")
+			case "br":
+				text.WriteString("\n")
+			case "h1", "h2":
+				text.WriteString("\n\n")
+			case "h3", "h4", "h5", "h6":
+				text.WriteString("\n")
+			case "li":
+				text.WriteString("\n• ")
+			case "tr":
+				text.WriteString("\n")
+			case "td", "th":
+				text.WriteString(" | ")
+			}
+		}
+	}
+
+	extractText(doc, false)
+
+	// Clean up the text
+	result := text.String()
+	// Remove excessive whitespace and empty lines
+	result = regexp.MustCompile(`\n{3,}`).ReplaceAllString(result, "\n\n")
+	result = regexp.MustCompile(`^\n+`).ReplaceAllString(result, "")
+	result = regexp.MustCompile(`\n+$`).ReplaceAllString(result, "")
+	result = strings.TrimSpace(result)
+	
+	// Remove excessive spaces
+	result = regexp.MustCompile(`  +`).ReplaceAllString(result, " ")
+	
+	return result
+}
+
 func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir string) {
 	// Check if ZIM file exists
 	zimPath := filepath.Join(sourceDir, "doc", "unrealircd_wiki.zim")
@@ -2151,19 +2213,128 @@ func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir str
 	contentView.SetDynamicColors(true)
 	contentView.SetWordWrap(true)
 	contentView.SetScrollable(true)
-	contentView.SetText(fmt.Sprintf("ZIM file opened successfully!\n\nArticle count: %d\n\nArticle browsing not implemented due to library API limitations.\n\nFile: %s", zimReader.ArticleCount(), zimPath))
 
 	list := tview.NewList()
 	list.SetBorder(true)
 	list.SetTitle("Articles")
 	list.SetBorderColor(tcell.ColorGreen)
-	list.AddItem("Main Page", "Welcome to UnrealIRCd Documentation", 0, nil)
+
+	// Get main page
+	mainPage, err := zimReader.MainPage()
+	mainPageContent := ""
+	if err == nil {
+		// Read main page content
+		reader, _, err := zimReader.BlobReader(&mainPage)
+		if err == nil {
+			content, err := io.ReadAll(reader)
+			if err == nil {
+				mainPageContent = htmlToText(string(content))
+				contentView.SetText(mainPageContent)
+			}
+		}
+	}
+
+	// Get articles from multiple namespaces
+	var allArticles []zim.DirectoryEntry
+	
+	// Try different namespaces that might contain documentation
+	namespaces := []zim.Namespace{
+		zim.NamespaceArticles,
+		zim.NamespaceLayout,
+		zim.NamespaceZimMetadata,
+	}
+	
+	for _, ns := range namespaces {
+		articles := zimReader.EntriesWithNamespace(ns, 200) // Get more articles
+		for _, article := range articles {
+			if article.IsArticle() {
+				allArticles = append(allArticles, article)
+			}
+		}
+	}
+
+	// Sort articles by title for better organization
+	sort.Slice(allArticles, func(i, j int) bool {
+		titleI := string(allArticles[i].Title())
+		titleJ := string(allArticles[j].Title())
+		if titleI == "" {
+			titleI = string(allArticles[i].URL())
+		}
+		if titleJ == "" {
+			titleJ = string(allArticles[j].URL())
+		}
+		return titleI < titleJ
+	})
+
+	// Limit the number of articles to display for performance
+	maxArticles := 100
+	if len(allArticles) > maxArticles {
+		allArticles = allArticles[:maxArticles]
+	}
+
+	// Populate the list
+	for i, article := range allArticles {
+		title := string(article.Title())
+		url := string(article.URL())
+		
+		// Use URL as fallback if title is empty
+		if title == "" {
+			title = url
+		}
+		
+		// Clean up title - remove namespace prefix if present
+		if strings.Contains(title, "/") {
+			parts := strings.Split(title, "/")
+			if len(parts) > 1 {
+				title = parts[len(parts)-1]
+			}
+		}
+		
+		// Clean up title for display
+		title = strings.TrimSpace(title)
+		if title == "" {
+			title = fmt.Sprintf("Article %d", i+1)
+		}
+		
+		// Create a meaningful secondary text
+		secondary := fmt.Sprintf("Namespace: %s", string(article.Namespace()))
+		if url != "" && url != title {
+			secondary += fmt.Sprintf(" | URL: %s", url)
+		}
+		
+		list.AddItem(title, secondary, 0, nil)
+	}
+
+	// If no articles found, add a placeholder
+	if list.GetItemCount() == 0 {
+		list.AddItem("Main Page", "Welcome to UnrealIRCd Documentation", 0, nil)
+	}
 
 	currentList = list
 
 	// Handle selection
 	list.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
-		contentView.SetText("Selected: " + mainText + "\n\nArticle content display not implemented.")
+		if index < len(allArticles) {
+			selectedArticle := allArticles[index]
+			reader, _, err := zimReader.BlobReader(&selectedArticle)
+			if err == nil {
+				content, err := io.ReadAll(reader)
+				if err == nil {
+					contentView.SetText(htmlToText(string(content)))
+				} else {
+					contentView.SetText(fmt.Sprintf("Error reading article content: %v", err))
+				}
+			} else {
+				contentView.SetText(fmt.Sprintf("Error getting article reader: %v", err))
+			}
+		} else {
+			// Show main page content
+			if mainPageContent != "" {
+				contentView.SetText(mainPageContent)
+			} else {
+				contentView.SetText("Welcome to UnrealIRCd Documentation\n\nNo main page content available.")
+			}
+		}
 	})
 
 	backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
@@ -2180,11 +2351,6 @@ func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir str
 	pages.AddPage("documentation", flex, true, true)
 	documentationFocusables = []tview.Primitive{list, contentView, backBtn}
 	app.SetFocus(list)
-
-	// Handle selection
-	list.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
-		contentView.SetText("Selected: " + mainText + "\n\nArticle content display coming soon.")
-	})
 }
 
 func checkForUpdatesPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
