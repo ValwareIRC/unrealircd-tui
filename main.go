@@ -2240,8 +2240,10 @@ func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir str
 	// Try a different approach - iterate through all articles by position
 	var allArticles []zim.DirectoryEntry
 	articleCount := int(zimReader.ArticleCount())
+	fmt.Printf("DEBUG: ArticleCount reports: %d\n", articleCount)
 	
-	for i := 0; i < articleCount && i < 100; i++ { // Limit to 100 for safety
+	maxToProcess := 50 // Only process first 50 to avoid performance issues
+	for i := 0; i < articleCount && i < maxToProcess; i++ {
 		entry, err := zimReader.EntryAtTitlePosition(uint32(i))
 		if err != nil {
 			continue
@@ -2250,22 +2252,11 @@ func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir str
 		// Include all articles, even if content can't be read
 		allArticles = append(allArticles, entry)
 	}
-
-	// Sort articles by title for better organization
-	sort.Slice(allArticles, func(i, j int) bool {
-		titleI := string(allArticles[i].Title())
-		titleJ := string(allArticles[j].Title())
-		if titleI == "" {
-			titleI = string(allArticles[i].URL())
-		}
-		if titleJ == "" {
-			titleJ = string(allArticles[j].URL())
-		}
-		return titleI < titleJ
-	})
+	
+	fmt.Printf("DEBUG: Processed %d articles\n", len(allArticles))
 
 	// Limit the number of articles to display for performance
-	maxArticles := 50 // Reduced for testing
+	maxArticles := 25 // Show only first 25
 	if len(allArticles) > maxArticles {
 		allArticles = allArticles[:maxArticles]
 	}
@@ -2275,32 +2266,47 @@ func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir str
 		title := string(article.Title())
 		url := string(article.URL())
 		
+		// Debug first few
+		if i < 5 {
+			fmt.Printf("DEBUG: Article %d - Title: '%s', URL: '%s'\n", i, title, url)
+		}
+		
 		// Use URL as fallback if title is empty
 		if title == "" {
 			title = url
 		}
 		
-		// Clean up title - remove namespace prefix if present
-		if strings.Contains(title, "/") {
-			parts := strings.Split(title, "/")
+		// For display, prefer the processed title, but ensure uniqueness
+		displayTitle := title
+		if strings.Contains(displayTitle, "/") {
+			parts := strings.Split(displayTitle, "/")
 			if len(parts) > 1 {
-				title = parts[len(parts)-1]
+				displayTitle = parts[len(parts)-1]
 			}
 		}
 		
-		// Clean up title for display
-		title = strings.TrimSpace(title)
-		if title == "" {
-			title = fmt.Sprintf("Article %d", i+1)
+		// If display title is still generic, include more context
+		if displayTitle == "ASN" || len(displayTitle) < 3 {
+			if title != url && title != "" {
+				displayTitle = title // Use full title
+			} else {
+				displayTitle = url // Use full URL
+			}
+		}
+		
+		// Clean up for display
+		displayTitle = strings.TrimSpace(displayTitle)
+		if displayTitle == "" {
+			displayTitle = fmt.Sprintf("Article %d", i+1)
 		}
 		
 		// Create a meaningful secondary text
 		secondary := fmt.Sprintf("Namespace: %s", string(article.Namespace()))
-		if url != "" && url != title {
+		if url != "" && url != displayTitle {
 			secondary += fmt.Sprintf(" | URL: %s", url)
 		}
 		
-		list.AddItem(title, secondary, 0, nil)
+		list.AddItem(displayTitle, secondary, 0, nil)
 	}
 
 	// If no articles found, add a placeholder
@@ -2324,7 +2330,7 @@ func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir str
 					contentView.SetText(fmt.Sprintf("Error reading article content: %v", err))
 				}
 			} else {
-				contentView.SetText(fmt.Sprintf("Article content not available.\n\nTitle: %s\nURL: %s\n\nThis ZIM file version may not be fully supported by the current library.\nError: %v", string(selectedArticle.Title()), string(selectedArticle.URL()), err))
+				contentView.SetText(fmt.Sprintf("Article Content Unavailable\n\nTitle: %s\nURL: %s\n\nThe content for this article cannot be displayed due to ZIM file format compatibility issues with the current library.\n\nThe main page loads correctly, suggesting the file is valid but uses compression or encoding not supported by this ZIM reader.\n\nError: %v", string(selectedArticle.Title()), string(selectedArticle.URL()), err))
 			}
 		} else {
 			// Show main page content
