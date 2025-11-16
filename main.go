@@ -2234,21 +2234,23 @@ func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir str
 		}
 	}
 
-	// Get articles from multiple namespaces
+	// Get articles from namespaces that contain actual browsable content
 	var allArticles []zim.DirectoryEntry
 	
-	// Try different namespaces that might contain documentation
+	// Only include namespaces with actual articles/pages, not metadata
 	namespaces := []zim.Namespace{
-		zim.NamespaceArticles,
-		zim.NamespaceLayout,
-		zim.NamespaceZimMetadata,
+		zim.NamespaceArticles,      // 'A' - actual articles
+		zim.NamespaceLayout,        // '-' - layout pages
 	}
 	
+	totalEntries := 0
 	for _, ns := range namespaces {
-		articles := zimReader.EntriesWithNamespace(ns, 200) // Get more articles
-		for _, article := range articles {
-			if article.IsArticle() {
-				allArticles = append(allArticles, article)
+		entries := zimReader.EntriesWithNamespace(ns, 500) // Get more entries
+		for _, entry := range entries {
+			totalEntries++
+			// Only include actual articles that have content
+			if entry.IsArticle() && len(entry.Title()) > 0 {
+				allArticles = append(allArticles, entry)
 			}
 		}
 	}
@@ -2308,6 +2310,7 @@ func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir str
 	// If no articles found, add a placeholder
 	if list.GetItemCount() == 0 {
 		list.AddItem("Main Page", "Welcome to UnrealIRCd Documentation", 0, nil)
+		list.AddItem("No Articles Found", "The ZIM file contains no browsable articles", 0, nil)
 	}
 
 	currentList = list
