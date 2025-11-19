@@ -25,7 +25,6 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/tim-st/go-zim"
 )
 
 var currentList *tview.List
@@ -39,7 +38,6 @@ var checkModulesFocusables []tview.Primitive
 var obbyScriptSubmenuFocusables []tview.Primitive
 var moduleManagerSubmenuFocusables []tview.Primitive
 var utilitiesFocusables []tview.Primitive
-var documentationFocusables []tview.Primitive
 
 var installationTips = []string{
 	"The IRCOp guide shows how to do everyday IRCOp tasks and contains tips on fighting spam and drones.\n\nhttps://www.unrealircd.org/docs/IRCOp_guide",
@@ -1103,7 +1101,6 @@ type Module struct {
 	Description          string
 	Version              string
 	Author               string
-	Documentation        string
 	Troubleshooting      string
 	Source               string
 	Sha256sum            string
@@ -1212,8 +1209,6 @@ func parseModulesList(content string) ([]Module, error) {
 							mod.Version = value
 						case "author":
 							mod.Author = value
-						case "documentation":
-							mod.Documentation = value
 						case "troubleshooting":
 							mod.Troubleshooting = value
 						case "source":
@@ -1281,9 +1276,6 @@ func formatModuleDetails(mod Module) string {
 	if mod.Author != "" {
 		details += fmt.Sprintf("[blue]Author:[white] %s\n", mod.Author)
 	}
-	if mod.Documentation != "" {
-		details += fmt.Sprintf("[blue]Documentation:[white] %s\n", mod.Documentation)
-	}
 	if mod.Troubleshooting != "" {
 		details += fmt.Sprintf("[blue]Troubleshooting:[white] %s\n", mod.Troubleshooting)
 	}
@@ -1305,6 +1297,269 @@ func formatModuleDetails(mod Module) string {
 	return details
 }
 
+// InstallOptions holds the configuration for automated installation
+type InstallOptions struct {
+	NicknameHistory string
+	GeoIP           string
+	BasePath        string
+	DefPerm         string
+	SSLDir          string
+	RemoteInc       string
+	MaxConnections  string
+	Sanitizer       string
+	ExtraPara       string
+}
+
+// parseInstallOptions parses command line arguments for installation options
+func parseInstallOptions(args []string) *InstallOptions {
+	opts := &InstallOptions{
+		NicknameHistory: "2000",
+		GeoIP:           "classic",
+		DefPerm:         "0600",
+		SSLDir:          "",
+		RemoteInc:       "1",
+		MaxConnections:  "auto",
+		Sanitizer:       "",
+		ExtraPara:       "",
+	}
+
+	// Set default base path
+	usr, _ := user.Current()
+	opts.BasePath = filepath.Join(usr.HomeDir, "unrealircd")
+
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--nickname-history=") {
+			opts.NicknameHistory = strings.TrimPrefix(arg, "--nickname-history=")
+		} else if strings.HasPrefix(arg, "--geoip=") {
+			geoip := strings.TrimPrefix(arg, "--geoip=")
+			if geoip == "classic" || geoip == "libmaxminddb" || geoip == "none" {
+				opts.GeoIP = geoip
+			}
+		} else if strings.HasPrefix(arg, "--basepath=") {
+			opts.BasePath = strings.TrimPrefix(arg, "--basepath=")
+		} else if strings.HasPrefix(arg, "--defperm=") {
+			opts.DefPerm = strings.TrimPrefix(arg, "--defperm=")
+		} else if strings.HasPrefix(arg, "--ssldir=") {
+			opts.SSLDir = strings.TrimPrefix(arg, "--ssldir=")
+		} else if strings.HasPrefix(arg, "--remoteinc=") {
+			remoteinc := strings.TrimPrefix(arg, "--remoteinc=")
+			if remoteinc == "0" || remoteinc == "1" || remoteinc == "2" {
+				opts.RemoteInc = remoteinc
+			}
+		} else if strings.HasPrefix(arg, "--maxconnections=") {
+			opts.MaxConnections = strings.TrimPrefix(arg, "--maxconnections=")
+		} else if strings.HasPrefix(arg, "--sanitizer=") {
+			sanitizer := strings.TrimPrefix(arg, "--sanitizer=")
+			if sanitizer == "0" || sanitizer == "1" {
+				opts.Sanitizer = sanitizer
+			}
+		} else if strings.HasPrefix(arg, "--extrapara=") {
+			opts.ExtraPara = strings.TrimPrefix(arg, "--extrapara=")
+		}
+	}
+
+	return opts
+}
+
+// runAutomatedInstall performs the complete installation process from command line
+func runAutomatedInstall(opts *InstallOptions) error {
+	fmt.Println("Starting automated UnrealIRCd installation...")
+	fmt.Printf("Installation directory: %s\n", opts.BasePath)
+	fmt.Printf("Nickname history: %s\n", opts.NicknameHistory)
+	fmt.Printf("GeoIP engine: %s\n", opts.GeoIP)
+	fmt.Printf("Permissions: %s\n", opts.DefPerm)
+
+	// Step 1: Download latest version
+	fmt.Println("\nStep 1: Checking for latest UnrealIRCd version...")
+	version, downloadURL, err := getLatestVersion()
+	if err != nil {
+		return fmt.Errorf("failed to get latest version: %w", err)
+	}
+	fmt.Printf("Latest version: %s\n", version)
+	fmt.Printf("Download URL: %s\n", downloadURL)
+
+	// Step 2: Create source directory
+	sourceDir := filepath.Join(os.TempDir(), "unrealircd-source-"+version)
+	fmt.Printf("\nStep 2: Creating source directory: %s\n", sourceDir)
+	if err := os.MkdirAll(sourceDir, 0755); err != nil {
+		return fmt.Errorf("failed to create source directory: %w", err)
+	}
+	defer os.RemoveAll(sourceDir) // Clean up on error
+
+	// Step 3: Download and extract
+	fmt.Println("\nStep 3: Downloading and extracting...")
+	err = downloadAndExtractFileCLI(downloadURL, sourceDir)
+	if err != nil {
+		return fmt.Errorf("failed to download and extract: %w", err)
+	}
+
+	// Find the actual source directory (tar.gz usually has a top-level directory)
+	entries, err := os.ReadDir(sourceDir)
+	if err != nil {
+		return fmt.Errorf("failed to read extracted directory: %w", err)
+	}
+	var actualSourceDir string
+	for _, entry := range entries {
+		if entry.IsDir() && strings.Contains(entry.Name(), "unrealircd") {
+			actualSourceDir = filepath.Join(sourceDir, entry.Name())
+			break
+		}
+	}
+	if actualSourceDir == "" {
+		return fmt.Errorf("could not find UnrealIRCd source directory in extracted files")
+	}
+	fmt.Printf("Found source directory: %s\n", actualSourceDir)
+
+	// Step 4: Save config.settings
+	fmt.Println("\nStep 4: Creating configuration...")
+	err = saveConfigSettings(actualSourceDir, opts.BasePath, opts.DefPerm, opts.SSLDir, opts.RemoteInc, opts.NicknameHistory, opts.GeoIP, opts.MaxConnections, opts.Sanitizer, opts.ExtraPara)
+	if err != nil {
+		return fmt.Errorf("failed to save config.settings: %w", err)
+	}
+
+	// Step 5: Run ./Config -quick
+	fmt.Println("\nStep 5: Running configuration...")
+	err = runConfigQuick(actualSourceDir)
+	if err != nil {
+		return fmt.Errorf("failed to run ./Config -quick: %w", err)
+	}
+
+	// Step 6: Build
+	fmt.Println("\nStep 6: Building UnrealIRCd...")
+	err = runMake(actualSourceDir)
+	if err != nil {
+		return fmt.Errorf("failed to build: %w", err)
+	}
+
+	// Step 7: Install
+	fmt.Println("\nStep 7: Installing...")
+	err = runMakeInstall(actualSourceDir, opts.BasePath)
+	if err != nil {
+		return fmt.Errorf("failed to install: %w", err)
+	}
+
+	// Step 8: Setup config
+	fmt.Println("\nStep 8: Setting up configuration...")
+	err = setupConfigFile(opts.BasePath)
+	if err != nil {
+		return fmt.Errorf("failed to setup config: %w", err)
+	}
+
+	// Step 9: Save our config
+	fmt.Println("\nStep 9: Saving installation configuration...")
+	config := &Config{
+		SourceDir: actualSourceDir,
+		BuildDir:  opts.BasePath,
+		Version:   version,
+	}
+	err = saveConfig(config)
+	if err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+
+	fmt.Printf("\nInstallation completed successfully!\n")
+	fmt.Printf("UnrealIRCd %s installed to: %s\n", version, opts.BasePath)
+	fmt.Printf("Configuration files are in: %s/conf/\n", opts.BasePath)
+	fmt.Printf("You can start the server with: %s/bin/unrealircd\n", opts.BasePath)
+
+	return nil
+}
+
+// getLatestVersion fetches the latest UnrealIRCd version
+func getLatestVersion() (string, string, error) {
+	resp, err := http.Get("https://www.unrealircd.org/downloads/list.json")
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", "", fmt.Errorf("HTTP error: %d", resp.StatusCode)
+	}
+
+	var updateResp UpdateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&updateResp); err != nil {
+		return "", "", err
+	}
+
+	// Find the latest stable version across all branches
+	var latestVersion string
+	var latestURL string
+	for _, versions := range updateResp {
+		if stable, ok := versions["Stable"]; ok && stable.Downloads.Src != "" {
+			if latestVersion == "" || compareVersions(stable.Version, latestVersion) > 0 {
+				latestVersion = stable.Version
+				latestURL = stable.Downloads.Src
+			}
+		}
+	}
+
+	if latestVersion == "" {
+		return "", "", fmt.Errorf("no stable version found")
+	}
+
+	return latestVersion, latestURL, nil
+}
+
+// downloadAndExtractFileCLI downloads and extracts a file (CLI version)
+func downloadAndExtractFileCLI(url, destDir string) error {
+	// Create temp file
+	tempFile, err := os.CreateTemp("", "unrealircd-*.tar.gz")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tempFile.Name())
+	defer tempFile.Close()
+
+	// Download
+	fmt.Printf("Downloading from %s...\n", url)
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("download failed with status %d", resp.StatusCode)
+	}
+
+	_, err = io.Copy(tempFile, resp.Body)
+	if err != nil {
+		return err
+	}
+
+	// Extract
+	fmt.Printf("Extracting to %s...\n", destDir)
+	return extractTarGz(tempFile.Name(), destDir)
+}
+
+// runConfigQuick runs ./Config -quick
+func runConfigQuick(sourceDir string) error {
+	cmd := exec.Command("./Config", "-quick")
+	cmd.Dir = sourceDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// runMake runs make
+func runMake(sourceDir string) error {
+	cmd := exec.Command("make")
+	cmd.Dir = sourceDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// runMakeInstall runs make install
+func runMakeInstall(sourceDir, installDir string) error {
+	cmd := exec.Command("make", "install")
+	cmd.Dir = sourceDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 func main() {
 	// Check for command-line arguments
 	if len(os.Args) > 1 {
@@ -1319,9 +1574,33 @@ func main() {
 			// Run test fleet creation in CLI mode
 			runTestFleetCLI(numServers)
 			return
+		} else if os.Args[1] == "--install-latest-unrealircd" {
+			// Parse installation options
+			installOpts := parseInstallOptions(os.Args[2:])
+			err := runAutomatedInstall(installOpts)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Installation failed: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println("Installation completed successfully!")
+			return
 		} else {
-			fmt.Fprintf(os.Stderr, "Usage: %s [--dev-test-fleet <number>]\n", os.Args[0])
+			fmt.Fprintf(os.Stderr, "Usage: %s [options]\n", os.Args[0])
+			fmt.Fprintf(os.Stderr, "\nGUI Mode:\n")
+			fmt.Fprintf(os.Stderr, "  (no arguments)  Start the interactive GUI\n")
+			fmt.Fprintf(os.Stderr, "\nCLI Mode:\n")
 			fmt.Fprintf(os.Stderr, "  --dev-test-fleet <number>  Create a test fleet with N servers (2-1000)\n")
+			fmt.Fprintf(os.Stderr, "  --install-latest-unrealircd [options]  Install latest UnrealIRCd automatically\n")
+			fmt.Fprintf(os.Stderr, "\nInstallation Options:\n")
+			fmt.Fprintf(os.Stderr, "  --nickname-history=<num>     Nickname history length (default: 2000)\n")
+			fmt.Fprintf(os.Stderr, "  --geoip=<classic|libmaxminddb|none>  GeoIP engine (default: classic)\n")
+			fmt.Fprintf(os.Stderr, "  --basepath=<path>            Installation directory (default: ~/unrealircd)\n")
+			fmt.Fprintf(os.Stderr, "  --defperm=<perms>            Default permissions (default: 0600)\n")
+			fmt.Fprintf(os.Stderr, "  --ssldir=<path>              OpenSSL/LibreSSL directory (default: auto-detect)\n")
+			fmt.Fprintf(os.Stderr, "  --remoteinc=<0|1|2>          Remote includes support (default: 1)\n")
+			fmt.Fprintf(os.Stderr, "  --maxconnections=<num|auto>  Maximum connections (default: auto)\n")
+			fmt.Fprintf(os.Stderr, "  --sanitizer=<0|1>            Enable sanitizers (default: 0)\n")
+			fmt.Fprintf(os.Stderr, "  --extrapara=<params>         Extra configure parameters\n")
 			os.Exit(1)
 		}
 	}
@@ -1440,8 +1719,6 @@ func main() {
 				focusables = moduleManagerSubmenuFocusables
 			case "utilities":
 				focusables = utilitiesFocusables
-			case "documentation":
-				focusables = documentationFocusables
 			}
 			if len(focusables) > 0 {
 				current := app.GetFocus()
@@ -1830,22 +2107,12 @@ Features:
 • Execute commands with Enter key (not mouse click)
 • Access server management utilities
 
-Direct access to UnrealIRCd's command-line interface.`,
-		"• Documentation": `Browse UnrealIRCd documentation.
-
-Features:
-• Read the official UnrealIRCd wiki offline
-• Search through documentation articles
-• Navigate wiki links and structure
-• Access comprehensive server documentation
-
-Complete offline documentation browser for UnrealIRCd.`}
+Direct access to UnrealIRCd's command-line interface.`}
 
 	list := tview.NewList()
 	list.SetBorder(true).SetBorderColor(tcell.ColorGreen)
 	list.AddItem("• Configuration", "  Browse and preview configuration files", 0, nil)
 	list.AddItem("• Utilities", "  Execute UnrealIRCd command-line utilities", 0, nil)
-	list.AddItem("• Documentation", "  Browse UnrealIRCd documentation", 0, nil)
 	list.AddItem("• Module Manager", "  Manage UnrealIRCd C modules", 0, nil)
 	list.AddItem("• Check for Updates", "  Check for available UnrealIRCd updates", 0, nil)
 	list.AddItem("• Installation Options", "  Manage UnrealIRCd installations", 0, nil)
@@ -1872,8 +2139,6 @@ Complete offline documentation browser for UnrealIRCd.`}
 				ui.ConfigurationMenuPage(app, pages, buildDir)
 			case "• Utilities":
 				utilitiesPage(app, pages, buildDir)
-			case "• Documentation":
-				documentationPage(app, pages, sourceDir)
 			case "• Module Manager":
 				moduleManagerSubmenuPage(app, pages, sourceDir, buildDir)
 			case "• Check for Updates":
@@ -1899,8 +2164,6 @@ Complete offline documentation browser for UnrealIRCd.`}
 			ui.ConfigurationMenuPage(app, pages, buildDir)
 		case "• Utilities":
 			utilitiesPage(app, pages, buildDir)
-		case "• Documentation":
-			documentationPage(app, pages, sourceDir)
 		case "• Module Manager":
 			moduleManagerSubmenuPage(app, pages, sourceDir, buildDir)
 		case "• Check for Updates":
@@ -2140,222 +2403,6 @@ func htmlToText(htmlContent string) string {
 	result = regexp.MustCompile(`  +`).ReplaceAllString(result, " ")
 	
 	return result
-}
-
-func documentationPage(app *tview.Application, pages *tview.Pages, sourceDir string) {
-	// Check if ZIM file exists
-	zimPath := filepath.Join(sourceDir, "doc", "unrealircd_wiki.zim")
-	fmt.Printf("DEBUG: Looking for ZIM file at: %s\n", zimPath)
-	if _, err := os.Stat(zimPath); os.IsNotExist(err) {
-		errorModal := tview.NewModal().
-			SetText(fmt.Sprintf("Documentation file not found: %s", zimPath)).
-			AddButtons([]string{"OK"}).
-			SetDoneFunc(func(int, string) {
-				pages.RemovePage("doc_error_modal")
-			})
-		pages.AddPage("doc_error_modal", errorModal, true, true)
-		return
-	}
-
-	// Open ZIM file
-	file, err := os.Open(zimPath)
-	if err != nil {
-		errorModal := tview.NewModal().
-			SetText(fmt.Sprintf("Error opening ZIM file: %v", err)).
-			AddButtons([]string{"OK"}).
-			SetDoneFunc(func(int, string) {
-				pages.RemovePage("doc_open_error_modal")
-			})
-		pages.AddPage("doc_open_error_modal", errorModal, true, true)
-		return
-	}
-	defer file.Close()
-
-	// Create ZIM reader
-	zimReader, err := zim.Open(zimPath)
-	if err != nil {
-		// Show error in content view instead of modal
-		contentView := tview.NewTextView()
-		contentView.SetBorder(true)
-		contentView.SetTitle("Content")
-		contentView.SetDynamicColors(true)
-		contentView.SetWordWrap(true)
-		contentView.SetScrollable(true)
-		contentView.SetText(fmt.Sprintf("Error reading ZIM file: %v\n\nThe ZIM file version may not be supported by the current library.\n\nFile: %s", err, zimPath))
-
-		list := tview.NewList()
-		list.SetBorder(true)
-		list.SetTitle("Articles")
-		list.SetBorderColor(tcell.ColorGreen)
-		list.AddItem("Error", "Failed to load articles", 0, nil)
-
-		backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
-			pages.SwitchToPage("main_menu")
-		})
-
-		buttonBar := createButtonBar(backBtn)
-
-		flex := tview.NewFlex().SetDirection(tview.FlexRow)
-		browserFlex := tview.NewFlex().
-			AddItem(list, 40, 0, true).
-			AddItem(contentView, 0, 1, false)
-		flex.AddItem(createHeader(), 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Main Menu | q: Quit"), 3, 0, false)
-		pages.AddPage("documentation", flex, true, true)
-		documentationFocusables = []tview.Primitive{list, contentView, backBtn}
-		app.SetFocus(list)
-		return
-	}
-	defer zimReader.Close()
-
-	fmt.Printf("DEBUG: ZIM file opened. ArticleCount(): %d\n", zimReader.ArticleCount())
-
-	// For now, show basic info since Article type is not exported
-	contentView := tview.NewTextView()
-	contentView.SetBorder(true)
-	contentView.SetTitle("Content")
-	contentView.SetDynamicColors(true)
-	contentView.SetWordWrap(true)
-	contentView.SetScrollable(true)
-
-	list := tview.NewList()
-	list.SetBorder(true)
-	list.SetTitle("Articles")
-	list.SetBorderColor(tcell.ColorGreen)
-
-	// Get main page
-	mainPage, err := zimReader.MainPage()
-	mainPageContent := ""
-	if err == nil {
-		// Read main page content
-		reader, _, err := zimReader.BlobReader(&mainPage)
-		if err == nil {
-			content, err := io.ReadAll(reader)
-			if err == nil {
-				mainPageContent = htmlToText(string(content))
-				contentView.SetText(mainPageContent)
-			}
-		}
-	}
-
-	// Try a different approach - iterate through all articles by position
-	var allArticles []zim.DirectoryEntry
-	articleCount := int(zimReader.ArticleCount())
-	fmt.Printf("DEBUG: ArticleCount reports: %d\n", articleCount)
-	
-	maxToProcess := 50 // Only process first 50 to avoid performance issues
-	for i := 0; i < articleCount && i < maxToProcess; i++ {
-		entry, err := zimReader.EntryAtTitlePosition(uint32(i))
-		if err != nil {
-			continue
-		}
-		
-		// Include all articles, even if content can't be read
-		allArticles = append(allArticles, entry)
-	}
-	
-	fmt.Printf("DEBUG: Processed %d articles\n", len(allArticles))
-
-	// Limit the number of articles to display for performance
-	maxArticles := 25 // Show only first 25
-	if len(allArticles) > maxArticles {
-		allArticles = allArticles[:maxArticles]
-	}
-
-	// Populate the list
-	for i, article := range allArticles {
-		title := string(article.Title())
-		url := string(article.URL())
-		
-		// Debug first few
-		if i < 5 {
-			fmt.Printf("DEBUG: Article %d - Title: '%s', URL: '%s'\n", i, title, url)
-		}
-		
-		// Use URL as fallback if title is empty
-		if title == "" {
-			title = url
-		}
-		
-		// For display, prefer the processed title, but ensure uniqueness
-		displayTitle := title
-		if strings.Contains(displayTitle, "/") {
-			parts := strings.Split(displayTitle, "/")
-			if len(parts) > 1 {
-				displayTitle = parts[len(parts)-1]
-			}
-		}
-		
-		// If display title is still generic, include more context
-		if displayTitle == "ASN" || len(displayTitle) < 3 {
-			if title != url && title != "" {
-				displayTitle = title // Use full title
-			} else {
-				displayTitle = url // Use full URL
-			}
-		}
-		
-		// Clean up for display
-		displayTitle = strings.TrimSpace(displayTitle)
-		if displayTitle == "" {
-			displayTitle = fmt.Sprintf("Article %d", i+1)
-		}
-		
-		// Create a meaningful secondary text
-		secondary := fmt.Sprintf("Namespace: %s", string(article.Namespace()))
-		if url != "" && url != displayTitle {
-			secondary += fmt.Sprintf(" | URL: %s", url)
-		}
-		
-		list.AddItem(displayTitle, secondary, 0, nil)
-	}
-
-	// If no articles found, add a placeholder
-	if list.GetItemCount() == 0 {
-		list.AddItem("Main Page", "Welcome to UnrealIRCd Documentation", 0, nil)
-		list.AddItem("No Articles Found", "The ZIM file contains no browsable articles", 0, nil)
-	}
-
-	currentList = list
-
-	// Handle selection
-	list.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
-		if index < len(allArticles) {
-			selectedArticle := allArticles[index]
-			reader, _, err := zimReader.BlobReader(&selectedArticle)
-			if err == nil {
-				content, err := io.ReadAll(reader)
-				if err == nil {
-					contentView.SetText(htmlToText(string(content)))
-				} else {
-					contentView.SetText(fmt.Sprintf("Error reading article content: %v", err))
-				}
-			} else {
-				contentView.SetText(fmt.Sprintf("Article Content Unavailable\n\nTitle: %s\nURL: %s\n\nThe content for this article cannot be displayed due to ZIM file format compatibility issues with the current library.\n\nThe main page loads correctly, suggesting the file is valid but uses compression or encoding not supported by this ZIM reader.\n\nError: %v", string(selectedArticle.Title()), string(selectedArticle.URL()), err))
-			}
-		} else {
-			// Show main page content
-			if mainPageContent != "" {
-				contentView.SetText(mainPageContent)
-			} else {
-				contentView.SetText("Welcome to UnrealIRCd Documentation\n\nNo main page content available.")
-			}
-		}
-	})
-
-	backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
-		pages.SwitchToPage("main_menu")
-	})
-
-	buttonBar := createButtonBar(backBtn)
-
-	flex := tview.NewFlex().SetDirection(tview.FlexRow)
-	browserFlex := tview.NewFlex().
-		AddItem(list, 40, 0, true).
-		AddItem(contentView, 0, 1, false)
-	flex.AddItem(createHeader(), 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Main Menu | q: Quit"), 3, 0, false)
-	pages.AddPage("documentation", flex, true, true)
-	documentationFocusables = []tview.Primitive{list, contentView, backBtn}
-	app.SetFocus(list)
 }
 
 func checkForUpdatesPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
