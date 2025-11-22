@@ -1,0 +1,6 @@
+github.com/klauspost/compress v1.18.1 h1:bcSGx7UbpBqMChDtsF28Lw6v/G94LPrrbMbdC3JH2co=
+github.com/klauspost/compress v1.18.1/go.mod h1:ZQFFVG+MdnR0P+l6wpXgIL4NTtwiKIdBnrBd8Nrxr+0=
+github.com/tim-st/go-zim v0.1.3 h1:KTpSHKzxjn4tLjymDxCPtAIo1nZyQs8kt7RG2MupINc=
+github.com/tim-st/go-zim v0.1.3/go.mod h1:ac2eYM1a06s/lJofEdg/6uheVCiTFlRHOo7e+NvuUFQ=
+github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 h1:nIPpBwaJSVYIxUFsDv3M8ofmx9yWTog9BfvIu0q41lo=
+github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8/go.mod h1:HUYIGzjTL3rfEspMxjDjgmT5uz5wzYJKVo23qUhYTos=

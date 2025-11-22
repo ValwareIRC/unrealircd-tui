@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"golang.org/x/net/html"
 	"io"
 	"net/http"
 	"os"
@@ -21,8 +22,6 @@ import (
 	"strings"
 	"time"
 	"utui/ui"
-
-	"golang.org/x/net/html"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -90,7 +89,410 @@ func (f *FocusableTextView) Blur() {
 	f.TextView.Blur()
 }
 
+func getLoadedModules(buildDir string) (map[string]bool, error) {
+	loaded := make(map[string]bool)
+	confDir := filepath.Join(buildDir, "conf")
+	re := regexp.MustCompile(`loadmodule\s+(.+?);`)
+	err := filepath.Walk(confDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !strings.HasSuffix(path, ".conf") || filepath.Base(path) == "modules.default.conf" {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		matches := re.FindAllStringSubmatch(string(content), -1)
+		for _, match := range matches {
+			if len(match) > 1 {
+				mod := strings.Trim(match[1], "\"")
+				loaded[mod] = true
+			}
+		}
+		return nil
+	})
+	return loaded, err
+}
 
+func getInstalledModules(buildDir string) (map[string]bool, error) {
+	installed := make(map[string]bool)
+	modulesDir := filepath.Join(buildDir, "modules")
+	err := filepath.Walk(modulesDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if strings.HasSuffix(path, ".so") {
+			rel, err := filepath.Rel(modulesDir, path)
+			if err != nil {
+				return err
+			}
+			mod := strings.TrimSuffix(rel, ".so")
+			installed[mod] = true
+		}
+		return nil
+	})
+	return installed, err
+}
+
+func getDefaultModules(buildDir string) (map[string]bool, error) {
+	defaultMods := make(map[string]bool)
+	defaultFile := filepath.Join(buildDir, "conf", "modules.default.conf")
+	content, err := os.ReadFile(defaultFile)
+	if err != nil {
+		return defaultMods, err
+	}
+	re := regexp.MustCompile(`loadmodule\s+(.+?);`)
+	matches := re.FindAllStringSubmatch(string(content), -1)
+	for _, match := range matches {
+		if len(match) > 1 {
+			mod := strings.Trim(match[1], "\"")
+			defaultMods[mod] = true
+		}
+	}
+	return defaultMods, nil
+}
+
+func removeLoadmodule(mod string, buildDir string) error {
+	confDir := filepath.Join(buildDir, "conf")
+	re := regexp.MustCompile(`(?m)^.*loadmodule\s+` + regexp.QuoteMeta(mod) + `\s*;.*$\n?`)
+	return filepath.Walk(confDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !strings.HasSuffix(path, ".conf") {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		newContent := re.ReplaceAllString(string(content), "")
+		if newContent != string(content) {
+			return os.WriteFile(path, []byte(newContent), 0644)
+		}
+		return nil
+	})
+}
+
+func removeSo(mod string, buildDir string) error {
+	soPath := filepath.Join(buildDir, "modules", mod+".so")
+	return os.Remove(soPath)
+}
+
+func removeFromSource(mod string, sourceDir string) error {
+	parts := strings.Split(mod, "/")
+	if len(parts) == 2 && parts[0] == "third" {
+		srcPath := filepath.Join(sourceDir, "src", "modules", parts[0], parts[1]+".c")
+		os.Remove(srcPath) // ignore error
+	}
+	return nil
+}
+
+func uninstallObbyScript(app *tview.Application, pages *tview.Pages, buildDir, sourceDir string) {
+	// First confirmation modal
+	firstConfirmModal := tview.NewModal().
+		SetText("Are you sure you want to uninstall ObbyScript?\n\nThis will remove all scripts and configurations.").
+		AddButtons([]string{"No", "Yes"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			pages.RemovePage("first_uninstall_confirm")
+			if buttonLabel == "Yes" {
+				// Second confirmation modal
+				secondConfirmModal := tview.NewModal().
+					SetText("Are you REALLY REALLY sure??!?!?\n\nThis action cannot be undone!\nAll your scripts will be permanently deleted!").
+					AddButtons([]string{"No", "Yes"}).
+					SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+						pages.RemovePage("second_uninstall_confirm")
+						if buttonLabel == "Yes" {
+							// Proceed with uninstallation
+							mod := "third/obbyscript"
+							removeLoadmodule(mod, buildDir)
+							removeSo(mod, buildDir)
+							removeFromSource(mod, sourceDir)
+							scriptsDir := filepath.Join(buildDir, "scripts")
+							os.RemoveAll(scriptsDir)
+							rehashPrompt(app, pages, buildDir)
+						}
+					})
+				pages.AddPage("second_uninstall_confirm", secondConfirmModal, true, true)
+			}
+		})
+	pages.AddPage("first_uninstall_confirm", firstConfirmModal, true, true)
+}
+
+func rehashPrompt(app *tview.Application, pages *tview.Pages, buildDir string) {
+	rehashModal := tview.NewModal().
+		SetText("Operation completed. Rehash the server? (./unrealircd rehash)").
+		AddButtons([]string{"No", "Yes"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			if buttonLabel == "Yes" {
+				go func() {
+					cmd := exec.Command("./unrealircd", "rehash")
+					cmd.Dir = buildDir
+					err := cmd.Run()
+					app.QueueUpdateDraw(func() {
+						if err != nil {
+							errorModal := tview.NewModal().
+								SetText(fmt.Sprintf("Rehash failed: %v", err)).
+								AddButtons([]string{"OK"}).
+								SetDoneFunc(func(int, string) {
+									pages.RemovePage("error_modal")
+								})
+							pages.AddPage("error_modal", errorModal, true, true)
+						} else {
+							successModal := tview.NewModal().
+								SetText("Server rehashed successfully!").
+								AddButtons([]string{"OK"}).
+								SetDoneFunc(func(int, string) {
+									pages.RemovePage("success_modal")
+								})
+							pages.AddPage("success_modal", successModal, true, true)
+						}
+					})
+				}()
+			}
+			pages.RemovePage("rehash_modal")
+		})
+	pages.AddPage("rehash_modal", rehashModal, true, true)
+}
+
+func addLoadmodule(mod string, buildDir string) error {
+	modsConf := filepath.Join(buildDir, "conf", "mods.conf")
+	content, err := os.ReadFile(modsConf)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "loadmodule "+mod+";") {
+			return nil // already there
+		}
+	}
+	newContent := string(content) + "\nloadmodule \"" + mod + "\";\n"
+	return os.WriteFile(modsConf, []byte(newContent), 0644)
+}
+
+func checkModulesPage(app *tview.Application, pages *tview.Pages, buildDir, sourceDir string) {
+	loaded, err := getLoadedModules(buildDir)
+	if err != nil {
+		errorModal := tview.NewModal().
+			SetText(fmt.Sprintf("Error scanning loaded modules: %v", err)).
+			AddButtons([]string{"OK"}).
+			SetDoneFunc(func(int, string) {
+				pages.RemovePage("error_modal")
+			})
+		pages.AddPage("error_modal", errorModal, true, true)
+		return
+	}
+
+	installed, err := getInstalledModules(buildDir)
+	if err != nil {
+		errorModal := tview.NewModal().
+			SetText(fmt.Sprintf("Error scanning installed modules: %v", err)).
+			AddButtons([]string{"OK"}).
+			SetDoneFunc(func(int, string) {
+				pages.RemovePage("error_modal")
+			})
+		pages.AddPage("error_modal", errorModal, true, true)
+		return
+	}
+
+	defaultMods, err := getDefaultModules(buildDir)
+	if err != nil {
+		// Ignore error if default file doesn't exist
+		defaultMods = make(map[string]bool)
+	}
+
+	allMods := make(map[string]bool)
+	for mod := range loaded {
+		allMods[mod] = true
+	}
+	for mod := range installed {
+		allMods[mod] = true
+	}
+
+	list := tview.NewList()
+	list.SetBorder(true).SetTitle("Module Status")
+	for mod := range allMods {
+		if defaultMods[mod] {
+			continue
+		}
+		inst := "No"
+		if installed[mod] {
+			inst = "Yes"
+		}
+		load := "No"
+		if loaded[mod] {
+			load = "Yes"
+		}
+		list.AddItem(mod, fmt.Sprintf("Installed: %s | Loaded: %s", inst, load), 0, nil)
+	}
+	currentList = list
+
+	textView := &FocusableTextView{tview.NewTextView()}
+	textView.SetBorder(true).SetTitle("Module Details")
+	textView.SetDynamicColors(true)
+	textView.SetWordWrap(true)
+	textView.SetScrollable(true)
+	textView.SetText("Select a module to view its status details.")
+
+	loadUnloadBtn := tview.NewButton("Load/Unload Module").SetSelectedFunc(func() {
+		index := list.GetCurrentItem()
+		if index < 0 {
+			return
+		}
+		mod, _ := list.GetItemText(index)
+		if loaded[mod] {
+			// Unload
+			confirmModal := tview.NewModal().
+				SetText(fmt.Sprintf("Unload module '%s'? This will remove loadmodule entries from config files.", mod)).
+				AddButtons([]string{"No", "Yes"}).
+				SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+					if buttonLabel == "Yes" {
+						err := removeLoadmodule(mod, buildDir)
+						if err != nil {
+							errorModal := tview.NewModal().
+								SetText(fmt.Sprintf("Error unloading: %v", err)).
+								AddButtons([]string{"OK"}).
+								SetDoneFunc(func(int, string) {
+									pages.RemovePage("error_modal")
+								})
+							pages.AddPage("error_modal", errorModal, true, true)
+						} else {
+							rehashPrompt(app, pages, buildDir)
+						}
+					}
+					pages.RemovePage("confirm_modal")
+				})
+			pages.AddPage("confirm_modal", confirmModal, true, true)
+		} else {
+			// Load
+			confirmModal := tview.NewModal().
+				SetText(fmt.Sprintf("Load module '%s'? This will add loadmodule to mods.conf.", mod)).
+				AddButtons([]string{"No", "Yes"}).
+				SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+					if buttonLabel == "Yes" {
+						err := addLoadmodule(mod, buildDir)
+						if err != nil {
+							errorModal := tview.NewModal().
+								SetText(fmt.Sprintf("Error loading: %v", err)).
+								AddButtons([]string{"OK"}).
+								SetDoneFunc(func(int, string) {
+									pages.RemovePage("error_modal")
+								})
+							pages.AddPage("error_modal", errorModal, true, true)
+						} else {
+							rehashPrompt(app, pages, buildDir)
+						}
+					}
+					pages.RemovePage("confirm_modal")
+				})
+			pages.AddPage("confirm_modal", confirmModal, true, true)
+		}
+	})
+
+	list.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		inst := "No"
+		if installed[mainText] {
+			inst = "Yes"
+		}
+		load := "No"
+		if loaded[mainText] {
+			load = "Yes"
+		}
+		textView.SetText(fmt.Sprintf("Module: %s\n\nInstalled: %s\nLoaded: %s", mainText, inst, load))
+		if loaded[mainText] {
+			loadUnloadBtn.SetLabel("Unload Module")
+		} else {
+			loadUnloadBtn.SetLabel("Load Module")
+		}
+	})
+
+	uninstallBtn := tview.NewButton("Uninstall Module").SetSelectedFunc(func() {
+		index := list.GetCurrentItem()
+		if index < 0 {
+			return
+		}
+		mod, _ := list.GetItemText(index)
+		confirmModal := tview.NewModal().
+			SetText(fmt.Sprintf("Uninstall module '%s'? This will remove the .so file and loadmodule entries.", mod)).
+			AddButtons([]string{"No", "Yes"}).
+			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+				if buttonLabel == "Yes" {
+					err1 := removeSo(mod, buildDir)
+					err2 := removeLoadmodule(mod, buildDir)
+					if err1 != nil || err2 != nil {
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Error uninstalling: removeSo: %v, removeLoadmodule: %v", err1, err2)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("error_modal")
+							})
+						pages.AddPage("error_modal", errorModal, true, true)
+					} else {
+						rehashPrompt(app, pages, buildDir)
+					}
+				}
+				pages.RemovePage("confirm_modal")
+			})
+		pages.AddPage("confirm_modal", confirmModal, true, true)
+	})
+
+	deleteBtn := tview.NewButton("Delete Module").SetSelectedFunc(func() {
+		index := list.GetCurrentItem()
+		if index < 0 {
+			return
+		}
+		mod, _ := list.GetItemText(index)
+		if !strings.HasPrefix(mod, "third/") || mod == "third/obbyscript" {
+			errorModal := tview.NewModal().
+				SetText("Cannot delete this module.").
+				AddButtons([]string{"OK"}).
+				SetDoneFunc(func(int, string) {
+					pages.RemovePage("error_modal")
+				})
+			pages.AddPage("error_modal", errorModal, true, true)
+			return
+		}
+		confirmModal := tview.NewModal().
+			SetText(fmt.Sprintf("Delete module '%s'? This will remove the .so file, loadmodule entries, and source file.", mod)).
+			AddButtons([]string{"No", "Yes"}).
+			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+				if buttonLabel == "Yes" {
+					err1 := removeSo(mod, buildDir)
+					err2 := removeLoadmodule(mod, buildDir)
+					err3 := removeFromSource(mod, sourceDir)
+					if err1 != nil || err2 != nil || err3 != nil {
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Error deleting: removeSo: %v, removeLoadmodule: %v, removeFromSource: %v", err1, err2, err3)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("error_modal")
+							})
+						pages.AddPage("error_modal", errorModal, true, true)
+					} else {
+						rehashPrompt(app, pages, buildDir)
+					}
+				}
+				pages.RemovePage("confirm_modal")
+			})
+		pages.AddPage("confirm_modal", confirmModal, true, true)
+	})
+
+	backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
+		pages.SwitchToPage("main_menu")
+	})
+	buttonBar := createButtonBar(loadUnloadBtn, uninstallBtn, deleteBtn, backBtn)
+
+	flex := tview.NewFlex().SetDirection(tview.FlexRow)
+	browserFlex := tview.NewFlex().
+		AddItem(list, 40, 0, true).
+		AddItem(textView, 0, 1, false)
+	flex.AddItem(createHeader(), 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Main Menu | q: Quit"), 3, 0, false)
+	pages.AddPage("check_modules", flex, true, true)
+	checkModulesFocusables = []tview.Primitive{list, textView, loadUnloadBtn, uninstallBtn, deleteBtn, backBtn}
+}
 
 const (
 	configFile = ".unrealircd_tui_config"
@@ -1259,7 +1661,7 @@ func main() {
 			buildDir = filepath.Join(usr.HomeDir, "unrealircd")
 			config = &Config{SourceDir: sourceDir, BuildDir: buildDir, Version: version}
 			saveConfig(config)
-			ui.MainMenuPage(app, pages, sourceDir, buildDir)
+			mainMenuPage(app, pages, sourceDir, buildDir)
 		} else {
 			// Show selection UI
 			selectSourcePage(app, pages, sourceDirs, func(selected string) {
@@ -1273,13 +1675,13 @@ func main() {
 				buildDir = filepath.Join(usr.HomeDir, "unrealircd")
 				config = &Config{SourceDir: sourceDir, BuildDir: buildDir, Version: version}
 				saveConfig(config)
-				ui.MainMenuPage(app, pages, sourceDir, buildDir)
+				mainMenuPage(app, pages, sourceDir, buildDir)
 			})
 		}
 	} else {
 		sourceDir = config.SourceDir
 		buildDir = config.BuildDir
-		ui.MainMenuPage(app, pages, sourceDir, buildDir)
+		mainMenuPage(app, pages, sourceDir, buildDir)
 	}
 
 	// Run
@@ -1455,7 +1857,7 @@ func startInstallation(app *tview.Application, pages *tview.Pages, sourceDir, bu
 			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
 				if buttonLabel == "Yes" {
 					pages.RemovePage("install")
-					ui.MainMenuPage(app, pages, "", "")
+					mainMenuPage(app, pages, "", "")
 				}
 				pages.RemovePage("cancel_confirm")
 			})
@@ -1488,7 +1890,7 @@ func startInstallation(app *tview.Application, pages *tview.Pages, sourceDir, bu
 		update("Installation complete!")
 		app.QueueUpdateDraw(func() {
 			pages.RemovePage("install")
-			ui.MainMenuPage(app, pages, sourceDir, buildDir)
+			mainMenuPage(app, pages, sourceDir, buildDir)
 		})
 	}()
 
@@ -1621,6 +2023,184 @@ func highlightUSL(text string) string {
 	return strings.Join(lines, "\n")
 }
 
+func mainMenuPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
+	// Text view on right for descriptions
+	textView := &FocusableTextView{tview.NewTextView()}
+	textView.SetBorder(true).SetTitle("Description")
+	textView.SetDynamicColors(true)
+	textView.SetWordWrap(true)
+	textView.SetScrollable(true)
+
+	// Descriptions
+	descriptions := map[string]string{
+		"• Module Manager": `Manage UnrealIRCd C modules.
+
+Features:
+• Browse and install third-party C modules
+• Check status of installed and loaded modules
+• Upload and install custom modules
+• Automatic compilation and installation
+• Module management and troubleshooting
+
+Comprehensive module management for your IRC server.`,
+		"• Check for Updates": `Check for available UnrealIRCd updates.
+
+Features:
+• Fetch latest stable version from official website
+• Compare with your current installed version
+• Automatic upgrade option with ./unrealircd upgrade
+• Update build directory configuration after successful upgrade
+
+Keep your UnrealIRCd installation up to date with the latest stable release.`,
+		"• Remote Control (RPC)": `Control UnrealIRCd server via JSON-RPC API.
+
+Features:
+• View and manage channels in real-time
+• Monitor connected users and their details
+• View server information and statistics
+• Manage server bans (G-lines, K-lines, Z-lines, etc)
+• Remote server administration without direct access
+
+Connect to your UnrealIRCd server's RPC interface for live control.`,
+		"• Configuration": `Browse and preview configuration files.
+
+Features:
+• View all configuration files and folders
+• Preview file contents directly in the interface
+• Navigate through configuration directory structure
+• Quick access to UnrealIRCd configuration files
+
+Easily manage and review your server configuration.`,
+		"• Installation Options": `Manage UnrealIRCd installations.
+
+Features:
+• Set up new UnrealIRCd installations
+• Switch between existing installations
+• Uninstall and remove installations
+• Manage multiple UnrealIRCd versions
+
+Complete installation management for your IRC server.`,
+		// "• ObbyScript": `Manage ObbyScript installation and scripts.
+
+		// Features:
+		// • Browse and install scripts from GitHub
+		// • View and edit installed scripts
+		// • Uninstall ObbyScript completely
+		// • Automatic configuration management
+		// • Syntax highlighting and code preview
+
+		// Extend your IRC server functionality with custom scripts and automation.`,
+		"• Dev Tools": `Developer tools and utilities.
+
+Features:
+• Run tests and diagnostics
+• Access development resources
+• Debug and troubleshooting tools
+• Development utilities and helpers
+
+Tools for developers working with UnrealIRCd.`,
+		"• Utilities": `Execute UnrealIRCd command-line utilities.
+
+Features:
+• Run ./unrealircd commands like rehash, mkpasswd, upgrade
+• View command output in real-time
+• Execute commands with Enter key (not mouse click)
+• Access server management utilities
+
+Direct access to UnrealIRCd's command-line interface.`}
+
+	list := tview.NewList()
+	list.SetBorder(true).SetBorderColor(tcell.ColorGreen)
+	list.AddItem("• Configuration", "  Browse and preview configuration files", 0, nil)
+	list.AddItem("• Utilities", "  Execute UnrealIRCd command-line utilities", 0, nil)
+	list.AddItem("• Module Manager", "  Manage UnrealIRCd C modules", 0, nil)
+	list.AddItem("• Check for Updates", "  Check for available UnrealIRCd updates", 0, nil)
+	list.AddItem("• Installation Options", "  Manage UnrealIRCd installations", 0, nil)
+	list.AddItem("• Remote Control (RPC)", "  Control UnrealIRCd server via JSON-RPC API", 0, nil)
+	// list.AddItem("• ObbyScript", "  Manage ObbyScript installation and scripts", 0, nil)
+	list.AddItem("• Dev Tools", "  Developer tools and utilities", 0, nil)
+
+	currentList = list
+
+	header := createHeader()
+
+	var lastClickTime time.Time
+	var lastClickIndex = -1
+
+	list.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		if desc, ok := descriptions[mainText]; ok {
+			textView.SetText(desc)
+		}
+		now := time.Now()
+		if index == lastClickIndex && now.Sub(lastClickTime) < 300*time.Millisecond {
+			// Double-click detected
+			switch mainText {
+			case "• Configuration":
+				ui.ConfigurationMenuPage(app, pages, buildDir)
+			case "• Utilities":
+				utilitiesPage(app, pages, buildDir)
+			case "• Module Manager":
+				moduleManagerSubmenuPage(app, pages, sourceDir, buildDir)
+			case "• Check for Updates":
+				checkForUpdatesPage(app, pages, sourceDir, buildDir)
+			case "• Installation Options":
+				installationOptionsPage(app, pages, sourceDir, buildDir)
+			case "• Remote Control (RPC)":
+				ui.RemoteControlMenuPage(app, pages, buildDir)
+			// case "• ObbyScript":
+			// 	obbyScriptSubmenuPage(app, pages, sourceDir, buildDir)
+			case "• Dev Tools":
+				devToolsSubmenuPage(app, pages, sourceDir, buildDir)
+			}
+		}
+		lastClickIndex = index
+		lastClickTime = now
+	})
+
+	list.SetSelectedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		// For Enter key
+		switch mainText {
+		case "• Configuration":
+			ui.ConfigurationMenuPage(app, pages, buildDir)
+		case "• Utilities":
+			utilitiesPage(app, pages, buildDir)
+		case "• Module Manager":
+			moduleManagerSubmenuPage(app, pages, sourceDir, buildDir)
+		case "• Check for Updates":
+			checkForUpdatesPage(app, pages, sourceDir, buildDir)
+		case "• Installation Options":
+			installationOptionsPage(app, pages, sourceDir, buildDir)
+		case "• Remote Control (RPC)":
+			ui.RemoteControlMenuPage(app, pages, buildDir)
+		// case "• ObbyScript":
+		// 	obbyScriptSubmenuPage(app, pages, sourceDir, buildDir)
+		case "• Dev Tools":
+			devToolsSubmenuPage(app, pages, sourceDir, buildDir)
+		}
+	})
+
+	list.SetInputCapture(nil) // Remove custom input capture
+
+	// Set initial description
+	if len(descriptions) > 0 {
+		textView.SetText(descriptions["• Configuration"])
+	}
+
+	quitBtn := tview.NewButton("Quit").SetSelectedFunc(func() {
+		app.Stop()
+	})
+
+	buttonBar := createButtonBar(quitBtn)
+
+	// Layout
+	flex := tview.NewFlex().SetDirection(tview.FlexRow)
+	browserFlex := tview.NewFlex().
+		AddItem(list, 40, 0, true).
+		AddItem(textView, 0, 1, false)
+	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
+	pages.AddPage("main_menu", flex, true, true)
+	mainMenuFocusables = []tview.Primitive{list, textView, quitBtn}
+}
 
 func utilitiesPage(app *tview.Application, pages *tview.Pages, buildDir string) {
 	// List of utilities on the left
@@ -1639,18 +2219,18 @@ func utilitiesPage(app *tview.Application, pages *tview.Pages, buildDir string) 
 
 	// Descriptions for utilities
 	descriptions := map[string]string{
-		"configtest":    "Test the configuration file for syntax errors and validity.\n\nThis command checks if your unrealircd.conf and other configuration files are properly formatted and contain no errors before starting the server.",
-		"start":         "Start the IRC Server.\n\nLaunches the UnrealIRCd daemon. Make sure the configuration is tested first with configtest.",
-		"stop":          "Stop (kill) the IRC Server.\n\nGracefully shuts down the running UnrealIRCd process. All users will be disconnected.",
-		"rehash":        "Reload the configuration file.\n\nReloads the configuration without restarting the server. Useful for applying configuration changes while the server is running.",
-		"reloadtls":     "Reload the SSL/TLS certificates.\n\nReloads SSL/TLS certificates and keys without restarting the server. Useful when certificates have been renewed.",
-		"restart":       "Restart the IRC Server (stop+start).\n\nStops the server and starts it again. All users will be disconnected during the restart.",
-		"status":        "Show current status of the IRC Server.\n\nDisplays information about whether the server is running, PID, uptime, and basic statistics.",
+		"configtest":   "Test the configuration file for syntax errors and validity.\n\nThis command checks if your unrealircd.conf and other configuration files are properly formatted and contain no errors before starting the server.",
+		"start":        "Start the IRC Server.\n\nLaunches the UnrealIRCd daemon. Make sure the configuration is tested first with configtest.",
+		"stop":         "Stop (kill) the IRC Server.\n\nGracefully shuts down the running UnrealIRCd process. All users will be disconnected.",
+		"rehash":       "Reload the configuration file.\n\nReloads the configuration without restarting the server. Useful for applying configuration changes while the server is running.",
+		"reloadtls":    "Reload the SSL/TLS certificates.\n\nReloads SSL/TLS certificates and keys without restarting the server. Useful when certificates have been renewed.",
+		"restart":      "Restart the IRC Server (stop+start).\n\nStops the server and starts it again. All users will be disconnected during the restart.",
+		"status":       "Show current status of the IRC Server.\n\nDisplays information about whether the server is running, PID, uptime, and basic statistics.",
 		"module-status": "Show all currently loaded modules.\n\nLists all modules that are currently loaded in the running server, including core and third-party modules.",
-		"version":       "Display the UnrealIRCd version.\n\nShows the version number, build date, and other version information of the installed UnrealIRCd.",
-		"genlinkblock":  "Generate link { } block for the other side.\n\nCreates a sample link block configuration that can be used to connect to another IRC server.",
-		"gencloak":      "Display 3 random cloak keys.\n\nGenerates random cloak keys that can be used in the configuration for hostname cloaking.",
-		"spkifp":        "Display SPKI Fingerprint.\n\nShows the SPKI (Subject Public Key Info) fingerprint of the server's SSL/TLS certificate.",
+		"version":      "Display the UnrealIRCd version.\n\nShows the version number, build date, and other version information of the installed UnrealIRCd.",
+		"genlinkblock": "Generate link { } block for the other side.\n\nCreates a sample link block configuration that can be used to connect to another IRC server.",
+		"gencloak":     "Display 3 random cloak keys.\n\nGenerates random cloak keys that can be used in the configuration for hostname cloaking.",
+		"spkifp":       "Display SPKI Fingerprint.\n\nShows the SPKI (Subject Public Key Info) fingerprint of the server's SSL/TLS certificate.",
 	}
 
 	// Add utility commands
@@ -1818,10 +2398,10 @@ func htmlToText(htmlContent string) string {
 	result = regexp.MustCompile(`^\n+`).ReplaceAllString(result, "")
 	result = regexp.MustCompile(`\n+$`).ReplaceAllString(result, "")
 	result = strings.TrimSpace(result)
-
+	
 	// Remove excessive spaces
 	result = regexp.MustCompile(`  +`).ReplaceAllString(result, " ")
-
+	
 	return result
 }
 
@@ -2362,7 +2942,7 @@ func continueInstallationAfterChecks(app *tview.Application, pages *tview.Pages,
 			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
 				if buttonLabel == "Yes" {
 					pages.RemovePage("install")
-					ui.MainMenuPage(app, pages, "", "")
+					mainMenuPage(app, pages, "", "")
 				}
 				pages.RemovePage("cancel_confirm")
 			})
@@ -2527,7 +3107,7 @@ func continueInstallationAfterChecks(app *tview.Application, pages *tview.Pages,
 		update("Installation complete!")
 		app.QueueUpdateDraw(func() {
 			pages.RemovePage("install")
-			ui.MainMenuPage(app, pages, sourceDir, buildDir)
+			mainMenuPage(app, pages, sourceDir, buildDir)
 		})
 	}()
 
@@ -2687,7 +3267,7 @@ func switchInstallPage(app *tview.Application, pages *tview.Pages) {
 				pages.RemovePage("switch_success_modal")
 				// Recreate main menu with new directories
 				pages.RemovePage("main_menu")
-				ui.MainMenuPage(app, pages, selectedDir, buildDir)
+				mainMenuPage(app, pages, selectedDir, buildDir)
 				pages.SwitchToPage("main_menu")
 			})
 		pages.AddPage("switch_success_modal", successModal, true, true)
@@ -2765,7 +3345,7 @@ Use this when you want to stop using scripts entirely.`}
 			case "• View Installed Scripts":
 				installedScriptsPage(app, pages, buildDir)
 			case "• Uninstall ObbyScript":
-				ui.UninstallObbyScript(app, pages, buildDir, sourceDir)
+				uninstallObbyScript(app, pages, buildDir, sourceDir)
 			}
 		}
 		lastClickIndex = index
@@ -2780,7 +3360,7 @@ Use this when you want to stop using scripts entirely.`}
 		case "• View Installed Scripts":
 			installedScriptsPage(app, pages, buildDir)
 		case "• Uninstall ObbyScript":
-			ui.UninstallObbyScript(app, pages, buildDir, sourceDir)
+			uninstallObbyScript(app, pages, buildDir, sourceDir)
 		}
 	})
 
@@ -4854,9 +5434,218 @@ func uninstallUnrealIRCdPage(app *tview.Application, pages *tview.Pages) {
 	app.SetFocus(list)
 }
 
+func moduleManagerSubmenuPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
+	// Text view on right for descriptions
+	textView := &FocusableTextView{tview.NewTextView()}
+	textView.SetBorder(true).SetTitle("Description")
+	textView.SetDynamicColors(true)
+	textView.SetWordWrap(true)
+	textView.SetScrollable(true)
 
+	// Descriptions for Module Manager submenu
+	descriptions := map[string]string{
+		"• Browse UnrealIRCd Third-Party Modules (C)": `Download and install third-party C modules from multiple sources.
 
+Features:
+• Browse modules from official UnrealIRCd repository
+• Support for custom module sources via modules.sources.list
+• Automatic compilation and installation
+• Post-install instructions and rehash prompts
+• Module details including version, author, and documentation
 
+Extend your IRC server with powerful compiled modules for enhanced functionality.`,
+		"• Check Installed Modules": `Check the status of installed and loaded modules.
+
+Features:
+• Scan all configuration files for loaded modules
+• Check modules directory for installed .so files
+• Display comprehensive status: installed vs loaded
+• Exclude default modules for clarity
+• Helps manage and troubleshoot module configurations
+
+Get a clear overview of your server's module setup.`,
+		"• Upload Custom Module": `Upload and install a custom C module.
+
+Features:
+• Paste your module source code
+• Automatic filename detection from module header
+• Save to src/modules/third/ directory
+• Ready for compilation and installation
+
+Install your own custom modules directly into the source tree.`}
+
+	list := tview.NewList()
+	list.SetBorder(true).SetBorderColor(tcell.ColorGreen)
+	list.SetTitle("Module Manager")
+	list.AddItem("• Browse UnrealIRCd Third-Party Modules (C)", "  Download and install third-party C modules", 0, nil)
+	list.AddItem("• Check Installed Modules", "  Check the status of installed and loaded modules", 0, nil)
+	list.AddItem("• Upload Custom Module", "  Upload and install a custom C module", 0, nil)
+
+	currentList = list
+
+	header := createHeader()
+
+	var lastClickTime time.Time
+	var lastClickIndex = -1
+
+	list.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		if desc, ok := descriptions[mainText]; ok {
+			textView.SetText(desc)
+		}
+		now := time.Now()
+		if index == lastClickIndex && now.Sub(lastClickTime) < 300*time.Millisecond {
+			// Double-click detected
+			switch mainText {
+			case "• Browse UnrealIRCd Third-Party Modules (C)":
+				thirdPartyBrowserPage(app, pages, sourceDir, buildDir)
+			case "• Check Installed Modules":
+				checkModulesPage(app, pages, buildDir, sourceDir)
+			case "• Upload Custom Module":
+				uploadCustomModulePage(app, pages, sourceDir)
+			}
+		}
+		lastClickIndex = index
+		lastClickTime = now
+	})
+
+	list.SetSelectedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		// For Enter key
+		switch mainText {
+		case "• Browse UnrealIRCd Third-Party Modules (C)":
+			thirdPartyBrowserPage(app, pages, sourceDir, buildDir)
+		case "• Check Installed Modules":
+			checkModulesPage(app, pages, buildDir, sourceDir)
+		case "• Upload Custom Module":
+			uploadCustomModulePage(app, pages, sourceDir)
+		}
+	})
+
+	list.SetInputCapture(nil) // Remove custom input capture
+
+	// Set initial description
+	if len(descriptions) > 0 {
+		textView.SetText(descriptions["• Browse UnrealIRCd Third-Party Modules (C)"])
+	}
+
+	backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
+		pages.RemovePage("module_manager_submenu")
+		pages.SwitchToPage("main_menu")
+	})
+
+	buttonBar := createButtonBar(backBtn)
+
+	// Layout
+	flex := tview.NewFlex().SetDirection(tview.FlexRow)
+	browserFlex := tview.NewFlex().
+		AddItem(list, 40, 0, true).
+		AddItem(textView, 0, 1, false)
+	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
+	pages.AddPage("module_manager_submenu", flex, true, true)
+	moduleManagerSubmenuFocusables = []tview.Primitive{list, textView, backBtn}
+}
+
+func uploadCustomModulePage(app *tview.Application, pages *tview.Pages, sourceDir string) {
+	textArea := tview.NewTextArea()
+	textArea.SetBorder(true).SetTitle("Paste your module source code here")
+	textArea.SetPlaceholder("Paste your C module code here...")
+
+	header := createHeader()
+
+	saveBtn := tview.NewButton("Save Module").SetSelectedFunc(func() {
+		code := textArea.GetText()
+		if code == "" {
+			modal := tview.NewModal().
+				SetText("Please paste some module code first.").
+				AddButtons([]string{"OK"}).
+				SetDoneFunc(func(int, string) {
+					pages.RemovePage("error_modal")
+				})
+			pages.AddPage("error_modal", modal, true, true)
+			return
+		}
+
+		// Parse the module name from the header
+		lines := strings.Split(code, "\n")
+		var moduleName string
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.Contains(line, `"third/`) && strings.Contains(line, `"`) {
+				// Extract the name after "third/"
+				start := strings.Index(line, `"third/`)
+				if start != -1 {
+					start += 7 // length of "third/"
+					end := strings.Index(line[start:], `"`)
+					if end != -1 {
+						moduleName = line[start : start+end]
+						break
+					}
+				}
+			}
+		}
+
+		if moduleName == "" {
+			modal := tview.NewModal().
+				SetText("Could not find module name in header. Make sure it contains 'third/module_name' in the ModuleHeader.").
+				AddButtons([]string{"OK"}).
+				SetDoneFunc(func(int, string) {
+					pages.RemovePage("error_modal")
+				})
+			pages.AddPage("error_modal", modal, true, true)
+			return
+		}
+
+		// Create the third directory if it doesn't exist
+		thirdDir := filepath.Join(sourceDir, "src", "modules", "third")
+		if err := os.MkdirAll(thirdDir, 0755); err != nil {
+			modal := tview.NewModal().
+				SetText(fmt.Sprintf("Failed to create directory: %v", err)).
+				AddButtons([]string{"OK"}).
+				SetDoneFunc(func(int, string) {
+					pages.RemovePage("error_modal")
+				})
+			pages.AddPage("error_modal", modal, true, true)
+			return
+		}
+
+		// Save the file
+		fileName := moduleName + ".c"
+		filePath := filepath.Join(thirdDir, fileName)
+		if err := os.WriteFile(filePath, []byte(code), 0644); err != nil {
+			modal := tview.NewModal().
+				SetText(fmt.Sprintf("Failed to save module: %v", err)).
+				AddButtons([]string{"OK"}).
+				SetDoneFunc(func(int, string) {
+					pages.RemovePage("error_modal")
+				})
+			pages.AddPage("error_modal", modal, true, true)
+			return
+		}
+
+		modal := tview.NewModal().
+			SetText(fmt.Sprintf("Module saved as %s\n\nYou can now compile it with:\nmake && make install", filePath)).
+			AddButtons([]string{"OK"}).
+			SetDoneFunc(func(int, string) {
+				pages.RemovePage("success_modal")
+			})
+		pages.AddPage("success_modal", modal, true, true)
+	})
+
+	backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
+		pages.RemovePage("upload_custom_module")
+		pages.SwitchToPage("module_manager_submenu")
+	})
+
+	buttonBar := createButtonBar(backBtn, saveBtn)
+
+	flex := tview.NewFlex().SetDirection(tview.FlexRow)
+	flex.AddItem(header, 3, 0, false).
+		AddItem(textArea, 0, 1, true).
+		AddItem(buttonBar, 3, 0, false).
+		AddItem(ui.CreateFooter("ESC: Back | Ctrl+S: Save | q: Quit"), 3, 0, false)
+
+	pages.AddPage("upload_custom_module", flex, true, true)
+	app.SetFocus(textArea)
+}
 
 func githubBrowserPage(app *tview.Application, pages *tview.Pages, buildDir string) {
 	confFile := filepath.Join(buildDir, "conf", "unrealircd.conf")
