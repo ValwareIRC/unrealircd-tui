@@ -15,16 +15,6 @@ import (
 	"github.com/rivo/tview"
 )
 
-func createHeader() *tview.TextView {
-	header := tview.NewTextView()
-	header.SetText("UnrealIRCd Terminal Manager by Valware")
-	header.SetTextAlign(tview.AlignCenter)
-	header.SetTextColor(tcell.ColorYellow)
-	header.SetBorder(true)
-	header.SetBorderColor(tcell.ColorBlue)
-	return header
-}
-
 func CreateFooter(shortcuts string) *tview.TextView {
 	footer := tview.NewTextView()
 	footer.SetText(shortcuts)
