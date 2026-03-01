@@ -1112,7 +1112,7 @@ type Module struct {
 
 func fetchRepoContents(owner, repo, path, ref string) ([]GitHubItem, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s", owner, repo, path, ref)
-	resp, err := http.Get(url)
+	resp, err := makeHTTPRequest(url)
 	if err != nil {
 		return nil, err
 	}
@@ -1133,7 +1133,7 @@ func fetchRepoContents(owner, repo, path, ref string) ([]GitHubItem, error) {
 }
 
 func fetchFileContent(downloadURL string) (string, error) {
-	resp, err := http.Get(downloadURL)
+	resp, err := makeHTTPRequest(downloadURL)
 	if err != nil {
 		return "", err
 	}
@@ -1644,12 +1644,25 @@ func main() {
 		// Scan for source dirs
 		sourceDirs, err := scanSourceDirs()
 		if err != nil {
-			// Show error
-			return
+			sourceDirs = []string{} // Continue with empty list so user can install
 		}
 		if len(sourceDirs) == 0 {
-			// No source dirs found
-			return
+			// No source dirs found — show main menu with prompt to install
+			usr, _ := user.Current()
+			sourceDir = ""
+			buildDir = filepath.Join(usr.HomeDir, "unrealircd")
+			mainMenuPage(app, pages, sourceDir, buildDir)
+			// Show a welcome modal prompting installation
+			welcomeModal := tview.NewModal().
+				SetText("No UnrealIRCd installation detected.\n\nWould you like to set one up now?").
+				AddButtons([]string{"Yes", "No"}).
+				SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+					pages.RemovePage("welcome_modal")
+					if buttonLabel == "Yes" {
+						setupNewInstallPage(app, pages)
+					}
+				})
+			pages.AddPage("welcome_modal", welcomeModal, true, true)
 		} else if len(sourceDirs) == 1 {
 			sourceDir = sourceDirs[0]
 			version, err := getUnrealIRCdVersion(sourceDir)
@@ -2062,6 +2075,16 @@ Features:
 • Remote server administration without direct access
 
 Connect to your UnrealIRCd server's RPC interface for live control.`,
+		"• Services Package": `Install and configure IRC services packages.
+
+Features:
+• Install Anope IRC Services (NickServ, ChanServ, etc.)
+• Install Atheme IRC Services (alternative services package)
+• Automatic download, compilation, and configuration
+• Link services to UnrealIRCd automatically
+• Configure UnrealIRCd for services integration
+
+Add professional services to your IRC network with one-click installation.`,
 		"• Configuration": `Browse and preview configuration files.
 
 Features:
@@ -2117,6 +2140,7 @@ Direct access to UnrealIRCd's command-line interface.`}
 	list.AddItem("• Check for Updates", "  Check for available UnrealIRCd updates", 0, nil)
 	list.AddItem("• Installation Options", "  Manage UnrealIRCd installations", 0, nil)
 	list.AddItem("• Remote Control (RPC)", "  Control UnrealIRCd server via JSON-RPC API", 0, nil)
+	list.AddItem("• Services Package", "  Install and configure IRC services packages", 0, nil)
 	// list.AddItem("• ObbyScript", "  Manage ObbyScript installation and scripts", 0, nil)
 	list.AddItem("• Dev Tools", "  Developer tools and utilities", 0, nil)
 
@@ -2147,6 +2171,8 @@ Direct access to UnrealIRCd's command-line interface.`}
 				installationOptionsPage(app, pages, sourceDir, buildDir)
 			case "• Remote Control (RPC)":
 				ui.RemoteControlMenuPage(app, pages, buildDir)
+			case "• Services Package":
+				servicesPackageSubmenuPage(app, pages, sourceDir, buildDir)
 			// case "• ObbyScript":
 			// 	obbyScriptSubmenuPage(app, pages, sourceDir, buildDir)
 			case "• Dev Tools":
@@ -2172,6 +2198,8 @@ Direct access to UnrealIRCd's command-line interface.`}
 			installationOptionsPage(app, pages, sourceDir, buildDir)
 		case "• Remote Control (RPC)":
 			ui.RemoteControlMenuPage(app, pages, buildDir)
+		case "• Services Package":
+			servicesPackageSubmenuPage(app, pages, sourceDir, buildDir)
 		// case "• ObbyScript":
 		// 	obbyScriptSubmenuPage(app, pages, sourceDir, buildDir)
 		case "• Dev Tools":
@@ -5542,6 +5570,984 @@ Install your own custom modules directly into the source tree.`}
 	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("ESC: Back | Enter: Select | q: Quit"), 3, 0, false)
 	pages.AddPage("module_manager_submenu", flex, true, true)
 	moduleManagerSubmenuFocusables = []tview.Primitive{list, textView, backBtn}
+}
+
+func servicesPackageSubmenuPage(app *tview.Application, pages *tview.Pages, sourceDir, buildDir string) {
+	// Text view on right for descriptions
+	textView := &FocusableTextView{tview.NewTextView()}
+	textView.SetBorder(true).SetTitle("Description")
+	textView.SetDynamicColors(true)
+	textView.SetWordWrap(true)
+	textView.SetScrollable(true)
+
+	// Descriptions for Services Package submenu
+	descriptions := map[string]string{
+		"• Install Anope Services": `Install and configure Anope IRC Services.
+
+Features:
+• Download latest Anope Services source code
+• Automatic compilation and installation
+• Generate services configuration files
+• Set up linking with UnrealIRCd
+• Configure ulines and link blocks
+• Post-install setup and testing
+
+Anope provides NickServ, ChanServ, MemoServ, and other essential IRC services for user and channel management.`,
+		"• Install Atheme Services": `Install and configure Atheme IRC Services.
+
+Features:
+• Download latest Atheme Services source code
+• Automatic compilation and installation
+• Generate services configuration files
+• Set up linking with UnrealIRCd
+• Configure ulines and link blocks
+• Post-install setup and testing
+
+Atheme provides NickServ, ChanServ, MemoServ, and other IRC services with a focus on security and flexibility.`}
+
+	list := tview.NewList()
+	list.SetBorder(true).SetBorderColor(tcell.ColorBlue)
+	list.SetTitle("Services Package")
+	list.AddItem("• Install Anope Services", "  Install and configure Anope IRC Services", 0, nil)
+	list.AddItem("• Install Atheme Services", "  Install and configure Atheme IRC Services", 0, nil)
+
+	currentList = list
+
+	header := createHeader()
+
+	var lastClickTime time.Time
+	var lastClickIndex = -1
+
+	list.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		if desc, ok := descriptions[mainText]; ok {
+			textView.SetText(desc)
+		}
+		now := time.Now()
+		if index == lastClickIndex && now.Sub(lastClickTime) < 300*time.Millisecond {
+			// Double-click detected
+			switch mainText {
+			case "• Install Anope Services":
+				installAnopeServices(app, pages, buildDir)
+			case "• Install Atheme Services":
+				installAthemeServices(app, pages, buildDir)
+			}
+		}
+		lastClickIndex = index
+		lastClickTime = now
+	})
+
+	list.SetSelectedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		// For Enter key
+		switch mainText {
+		case "• Install Anope Services":
+			installAnopeServices(app, pages, buildDir)
+		case "• Install Atheme Services":
+			installAthemeServices(app, pages, buildDir)
+		}
+	})
+
+	list.SetInputCapture(nil) // Remove custom input capture
+
+	// Set initial description
+	if len(descriptions) > 0 {
+		textView.SetText(descriptions["• Install Anope Services"])
+	}
+
+	backBtn := tview.NewButton("Back").SetSelectedFunc(func() {
+		pages.RemovePage("services_package_submenu")
+		pages.SwitchToPage("main_menu")
+	})
+
+	buttonBar := createButtonBar(backBtn)
+
+	// Layout
+	flex := tview.NewFlex().SetDirection(tview.FlexRow)
+	browserFlex := tview.NewFlex().
+		AddItem(list, 40, 0, true).
+		AddItem(textView, 0, 1, false)
+	flex.AddItem(header, 3, 0, false).AddItem(browserFlex, 0, 1, true).AddItem(buttonBar, 3, 0, false).AddItem(ui.CreateFooter("Double-click or Enter: Select | b: Back"), 3, 0, false)
+	pages.AddPage("services_package_submenu", flex, true, true)
+	app.SetFocus(list)
+}
+
+// Helper function to make HTTP requests with User-Agent
+func makeHTTPRequest(url string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "UnrealIRCd-TUI/1.0")
+	
+	client := &http.Client{}
+	return client.Do(req)
+}
+
+func installAnopeServices(app *tview.Application, pages *tview.Pages, buildDir string) {
+	// Show progress modal for Anope installation
+	modal := tview.NewModal().
+		SetText("Installing Anope Services...\n\nThis may take several minutes.").
+		AddButtons([]string{}).
+		SetDoneFunc(func(int, string) {})
+	pages.AddPage("anope_install_modal", modal, true, true)
+
+	go func() {
+		updateProgress := func(text string) {
+			app.QueueUpdateDraw(func() {
+				modal.SetText(text)
+			})
+		}
+
+		// Create services directory
+		usr, _ := user.Current()
+		servicesDir := filepath.Join(usr.HomeDir, "anope-services")
+		updateProgress("Creating services directory...")
+
+		if err := os.MkdirAll(servicesDir, 0755); err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("anope_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Failed to create services directory: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("anope_error_modal")
+					})
+				pages.AddPage("anope_error_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		// Download latest Anope version
+		updateProgress("Fetching latest Anope version...")
+		resp, err := makeHTTPRequest("https://api.github.com/repos/anope/anope/releases/latest")
+		if err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("anope_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Failed to fetch Anope releases: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("anope_error_modal")
+					})
+				pages.AddPage("anope_error_modal", errorModal, true, true)
+			})
+			return
+		}
+		defer resp.Body.Close()
+
+		var release struct {
+			TagName    string `json:"tag_name"`
+			TarballURL string `json:"tarball_url"`
+			Assets     []struct {
+				Name        string `json:"name"`
+				DownloadURL string `json:"browser_download_url"`
+			} `json:"assets"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("anope_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Failed to parse release info: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("anope_error_modal")
+					})
+				pages.AddPage("anope_error_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		// Use the tarball URL from GitHub
+		downloadURL := release.TarballURL
+		if downloadURL == "" {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("anope_install_modal")
+				errorModal := tview.NewModal().
+					SetText("Could not find Anope source download").
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("anope_error_modal")
+					})
+				pages.AddPage("anope_error_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		updateProgress(fmt.Sprintf("Downloading Anope %s...", release.TagName))
+
+		// Download and extract
+		resp, err = makeHTTPRequest(downloadURL)
+		if err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("anope_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Failed to download Anope: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("anope_error_modal")
+					})
+				pages.AddPage("anope_error_modal", errorModal, true, true)
+			})
+			return
+		}
+		defer resp.Body.Close()
+
+		// Extract tar.gz
+		gzr, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("anope_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Failed to create gzip reader: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("anope_error_modal")
+					})
+				pages.AddPage("anope_error_modal", errorModal, true, true)
+			})
+			return
+		}
+		defer gzr.Close()
+
+		tr := tar.NewReader(gzr)
+		var topLevelDir string
+		for {
+			header, err := tr.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("anope_install_modal")
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Failed to read tar: %v", err)).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("anope_error_modal")
+						})
+					pages.AddPage("anope_error_modal", errorModal, true, true)
+				})
+				return
+			}
+
+			// Find the top-level directory
+			if header.Typeflag == tar.TypeDir && topLevelDir == "" {
+				topLevelDir = header.Name
+				continue
+			}
+
+			// Skip if we haven't found the top-level dir yet
+			if topLevelDir == "" {
+				continue
+			}
+
+			target := filepath.Join(servicesDir, strings.TrimPrefix(header.Name, topLevelDir))
+			if header.Typeflag == tar.TypeDir {
+				if err := os.MkdirAll(target, 0755); err != nil {
+					app.QueueUpdateDraw(func() {
+						pages.RemovePage("anope_install_modal")
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Failed to create directory: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("anope_error_modal")
+							})
+						pages.AddPage("anope_error_modal", errorModal, true, true)
+					})
+					return
+				}
+			} else {
+				parentDir := filepath.Dir(target)
+				if err := os.MkdirAll(parentDir, 0755); err != nil {
+					app.QueueUpdateDraw(func() {
+						pages.RemovePage("anope_install_modal")
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Failed to create parent directory: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("anope_error_modal")
+							})
+						pages.AddPage("anope_error_modal", errorModal, true, true)
+					})
+					return
+				}
+				f, err := os.Create(target)
+				if err != nil {
+					app.QueueUpdateDraw(func() {
+						pages.RemovePage("anope_install_modal")
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Failed to create file: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("anope_error_modal")
+							})
+						pages.AddPage("anope_error_modal", errorModal, true, true)
+					})
+					return
+				}
+				if _, err := io.Copy(f, tr); err != nil {
+					f.Close()
+					app.QueueUpdateDraw(func() {
+						pages.RemovePage("anope_install_modal")
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Failed to write file: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("anope_error_modal")
+							})
+						pages.AddPage("anope_error_modal", errorModal, true, true)
+					})
+					return
+				}
+				f.Close()
+			}
+		}
+
+		// Debug: list extracted files
+		var extractedFiles []string
+		err = filepath.Walk(servicesDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			relPath, _ := filepath.Rel(servicesDir, path)
+			extractedFiles = append(extractedFiles, relPath)
+			return nil
+		})
+		if err != nil {
+			extractedFiles = []string{"error listing files"}
+		}
+
+		updateProgress("Configuring Anope...")
+
+		// Create config.cache for Config script
+		configCacheContent := fmt.Sprintf(`INSTDIR="%s"
+RUNGROUP=""
+UMASK=077
+DEBUG="no"
+USE_PCH="no"
+EXTRA_INCLUDE_DIRS=""
+EXTRA_LIB_DIRS=""
+EXTRA_CONFIG_ARGS=""
+`, servicesDir)
+		configCachePath := filepath.Join(servicesDir, "config.cache")
+		if err := os.WriteFile(configCachePath, []byte(configCacheContent), 0644); err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("anope_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Failed to create config.cache: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("anope_error_modal")
+					})
+				pages.AddPage("anope_error_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		// Make Config script executable
+		configPath := filepath.Join(servicesDir, "Config")
+		if err := os.Chmod(configPath, 0755); err != nil {
+			// Config script might not exist, try CMake directly
+		}
+
+		// Try Config script first, fall back to CMake
+		cmd := exec.Command("./Config", "-quick")
+		cmd.Dir = servicesDir
+		if output, err := cmd.CombinedOutput(); err != nil {
+			// Config failed, try CMake directly
+			updateProgress("Config failed, trying CMake...")
+			cmd = exec.Command("cmake", "-B", "build", "-S", ".")
+			cmd.Dir = servicesDir
+			if cmakeOutput, cmakeErr := cmd.CombinedOutput(); cmakeErr != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("anope_install_modal")
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Both Config and CMake failed.\nConfig: %v\nCMake: %v\nConfig output: %s\nCMake output: %s\nExtracted files: %v", err, cmakeErr, string(output), string(cmakeOutput), extractedFiles)).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("anope_error_modal")
+						})
+					pages.AddPage("anope_error_modal", errorModal, true, true)
+				})
+				return
+			}
+		} else {
+			// Config succeeded, proceed to build
+		}
+
+		updateProgress("Building Anope...")
+
+		// Check if build directory exists (created by CMake) or build in-place
+		buildDir := filepath.Join(servicesDir, "build")
+		if _, err := os.Stat(buildDir); os.IsNotExist(err) {
+			// No build directory, build in-place
+			cmd = exec.Command("make")
+			cmd.Dir = servicesDir
+		} else {
+			// Build directory exists, use it
+			cmd = exec.Command("make")
+			cmd.Dir = buildDir
+		}
+		if output, err := cmd.CombinedOutput(); err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("anope_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Make failed: %v\nOutput: %s", err, string(output))).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("anope_error_modal")
+					})
+				pages.AddPage("anope_error_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		updateProgress("Installing Anope...")
+
+		// Run make install from appropriate directory
+		if _, err := os.Stat(buildDir); os.IsNotExist(err) {
+			cmd = exec.Command("make", "install")
+			cmd.Dir = servicesDir
+		} else {
+			cmd = exec.Command("make", "install")
+			cmd.Dir = buildDir
+		}
+		if output, err := cmd.CombinedOutput(); err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("anope_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Make install failed: %v\nOutput: %s", err, string(output))).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("anope_error_modal")
+					})
+				pages.AddPage("anope_error_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		updateProgress("Configuring services...")
+
+		// Configure anope.conf
+		anopeConfPath := filepath.Join(servicesDir, "conf", "anope.conf")
+		if err := configureAnopeServices(anopeConfPath, buildDir); err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("anope_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Failed to configure services: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("anope_error_modal")
+					})
+				pages.AddPage("anope_error_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		updateProgress("Configuring UnrealIRCd linking...")
+
+		// Configure UnrealIRCd for services linking
+		if err := configureUnrealForServices(buildDir, "services.localhost", "anope"); err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("anope_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Failed to configure UnrealIRCd: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("anope_error_modal")
+					})
+				pages.AddPage("anope_error_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		// Success
+		app.QueueUpdateDraw(func() {
+			pages.RemovePage("anope_install_modal")
+			successModal := tview.NewModal().
+				SetText(fmt.Sprintf("Anope Services %s installed successfully!\n\nServices directory: %s\n\nTo start services: cd %s && ./services\n\nDon't forget to rehash UnrealIRCd after starting services.", release.TagName, servicesDir, servicesDir)).
+				AddButtons([]string{"OK"}).
+				SetDoneFunc(func(int, string) {
+					pages.RemovePage("anope_success_modal")
+				})
+			pages.AddPage("anope_success_modal", successModal, true, true)
+		})
+	}()
+}
+
+func configureAnopeServices(configPath, unrealBuildDir string) error {
+	// Read the default services.conf
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("reading services.conf: %w", err)
+	}
+
+	contentStr := string(content)
+
+	// Basic configuration replacements
+	contentStr = strings.ReplaceAll(contentStr, "irc.example.org", "services.localhost")
+	contentStr = strings.ReplaceAll(contentStr, "example.org", "localhost")
+
+	// Set up server info
+	serverInfo := `serverinfo {
+	name = "services.localhost"
+	description = "Anope IRC Services"
+	numeric = "00A"
+}`
+
+	// Replace the serverinfo block
+	serverInfoRegex := regexp.MustCompile(`(?s)serverinfo\s*\{[^}]*\};`)
+	contentStr = string(serverInfoRegex.ReplaceAllLiteral([]byte(contentStr), []byte(serverInfo)))
+
+	// Configure uplink
+	uplinkConfig := `uplink {
+	host = "127.0.0.1"
+	port = 6667
+	password = "serviceslinkpass"
+}`
+
+	// Replace uplink block
+	uplinkRegex := regexp.MustCompile(`(?s)uplink\s*\{[^}]*\};`)
+	contentStr = string(uplinkRegex.ReplaceAllLiteral([]byte(contentStr), []byte(uplinkConfig)))
+
+	// Write back
+	return os.WriteFile(configPath, []byte(contentStr), 0644)
+}
+
+func configureAthemeServices(configPath, unrealBuildDir string) error {
+	// Read the default atheme.conf
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("reading atheme.conf: %w", err)
+	}
+
+	contentStr := string(content)
+
+	// Basic configuration replacements
+	contentStr = strings.ReplaceAll(contentStr, "irc.example.org", "services.localhost")
+	contentStr = strings.ReplaceAll(contentStr, "example.org", "localhost")
+
+	// Configure server info
+	serverInfo := `serverinfo {
+	name = "services.localhost";
+	desc = "Atheme IRC Services";
+	numeric = "00A";
+};`
+
+	// Replace the serverinfo block
+	serverInfoRegex := regexp.MustCompile(`(?s)serverinfo\s*\{[^}]*\};`)
+	contentStr = string(serverInfoRegex.ReplaceAllLiteral([]byte(contentStr), []byte(serverInfo)))
+
+	// Configure uplink
+	uplinkConfig := `uplink "irc.localhost" {
+	host = "127.0.0.1";
+	port = 6667;
+	password = "serviceslinkpass";
+};`
+
+	// Replace uplink block
+	uplinkRegex := regexp.MustCompile(`(?s)uplink\s+"[^"]*"\s*\{[^}]*\};`)
+	contentStr = string(uplinkRegex.ReplaceAllLiteral([]byte(contentStr), []byte(uplinkConfig)))
+
+	// Write back
+	return os.WriteFile(configPath, []byte(contentStr), 0644)
+}
+
+func configureUnrealForServices(buildDir, servicesHost, servicesType string) error {
+	confFile := filepath.Join(buildDir, "conf", "unrealircd.conf")
+
+	// Read current config
+	content, err := os.ReadFile(confFile)
+	if err != nil {
+		return fmt.Errorf("reading unrealircd.conf: %w", err)
+	}
+
+	contentStr := string(content)
+
+	// Add ulines block if not present
+	if !strings.Contains(contentStr, "ulines {") {
+		contentStr += fmt.Sprintf(`
+
+ulines {
+	%s;
+};`, servicesHost)
+	}
+
+	// Add link block for services
+	linkBlock := fmt.Sprintf(`
+
+link %s {
+	incoming {
+		mask *;
+	}
+	outgoing {
+		hostname 127.0.0.1;
+		port 6667;
+		options { autoconnect; };
+	}
+	password "serviceslinkpass" { spkifp; }
+	class servers;
+};`, servicesHost)
+
+	contentStr += linkBlock
+
+	// Write back
+	return os.WriteFile(confFile, []byte(contentStr), 0644)
+}
+
+func installAthemeServices(app *tview.Application, pages *tview.Pages, buildDir string) {
+	// Show progress modal for Atheme installation
+	modal := tview.NewModal().
+		SetText("Installing Atheme Services...\n\nThis may take several minutes.").
+		AddButtons([]string{}).
+		SetDoneFunc(func(int, string) {})
+	pages.AddPage("atheme_install_modal", modal, true, true)
+
+	go func() {
+		updateProgress := func(text string) {
+			app.QueueUpdateDraw(func() {
+				modal.SetText(text)
+			})
+		}
+
+		// Create services directory
+		usr, _ := user.Current()
+		servicesDir := filepath.Join(usr.HomeDir, "atheme-services")
+		updateProgress("Creating services directory...")
+
+		if err := os.MkdirAll(servicesDir, 0755); err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("atheme_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Failed to create services directory: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("atheme_error_modal")
+					})
+				pages.AddPage("atheme_error_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		// Download latest Atheme version
+		updateProgress("Fetching latest Atheme version...")
+		resp, err := makeHTTPRequest("https://api.github.com/repos/atheme/atheme/releases/latest")
+		if err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("atheme_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Failed to fetch Atheme releases: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("atheme_error_modal")
+					})
+				pages.AddPage("atheme_error_modal", errorModal, true, true)
+			})
+			return
+		}
+		defer resp.Body.Close()
+
+		var release struct {
+			TagName    string `json:"tag_name"`
+			TarballURL string `json:"tarball_url"`
+			Assets     []struct {
+				Name        string `json:"name"`
+				DownloadURL string `json:"browser_download_url"`
+			} `json:"assets"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("atheme_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Failed to parse release info: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("atheme_error_modal")
+					})
+				pages.AddPage("atheme_error_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		// Use the tarball URL from GitHub
+		downloadURL := release.TarballURL
+		if downloadURL == "" {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("atheme_install_modal")
+				errorModal := tview.NewModal().
+					SetText("Could not find Atheme source download").
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("atheme_error_modal")
+					})
+				pages.AddPage("atheme_error_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		updateProgress(fmt.Sprintf("Downloading Atheme %s...", release.TagName))
+
+		// Download and extract
+		resp, err = makeHTTPRequest(downloadURL)
+		if err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("atheme_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Failed to download Atheme: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("atheme_error_modal")
+					})
+				pages.AddPage("atheme_error_modal", errorModal, true, true)
+			})
+			return
+		}
+		defer resp.Body.Close()
+
+		// Extract tar.gz
+		gzr, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("atheme_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Failed to create gzip reader: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("atheme_error_modal")
+					})
+				pages.AddPage("atheme_error_modal", errorModal, true, true)
+			})
+			return
+		}
+		defer gzr.Close()
+
+		tr := tar.NewReader(gzr)
+		var topLevelDir string
+		for {
+			header, err := tr.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("atheme_install_modal")
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Failed to read tar: %v", err)).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("atheme_error_modal")
+						})
+					pages.AddPage("atheme_error_modal", errorModal, true, true)
+				})
+				return
+			}
+
+			// Find the top-level directory
+			if header.Typeflag == tar.TypeDir && topLevelDir == "" {
+				topLevelDir = header.Name
+				continue
+			}
+
+			// Skip if we haven't found the top-level dir yet
+			if topLevelDir == "" {
+				continue
+			}
+
+			target := filepath.Join(servicesDir, strings.TrimPrefix(header.Name, topLevelDir))
+			if header.Typeflag == tar.TypeDir {
+				if err := os.MkdirAll(target, 0755); err != nil {
+					app.QueueUpdateDraw(func() {
+						pages.RemovePage("atheme_install_modal")
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Failed to create directory: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("atheme_error_modal")
+							})
+						pages.AddPage("atheme_error_modal", errorModal, true, true)
+					})
+					return
+				}
+			} else {
+				parentDir := filepath.Dir(target)
+				if err := os.MkdirAll(parentDir, 0755); err != nil {
+					app.QueueUpdateDraw(func() {
+						pages.RemovePage("atheme_install_modal")
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Failed to create parent directory: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("atheme_error_modal")
+							})
+						pages.AddPage("atheme_error_modal", errorModal, true, true)
+					})
+					return
+				}
+				f, err := os.Create(target)
+				if err != nil {
+					app.QueueUpdateDraw(func() {
+						pages.RemovePage("atheme_install_modal")
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Failed to create file: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("atheme_error_modal")
+							})
+						pages.AddPage("atheme_error_modal", errorModal, true, true)
+					})
+					return
+				}
+				if _, err := io.Copy(f, tr); err != nil {
+					f.Close()
+					app.QueueUpdateDraw(func() {
+						pages.RemovePage("atheme_install_modal")
+						errorModal := tview.NewModal().
+							SetText(fmt.Sprintf("Failed to write file: %v", err)).
+							AddButtons([]string{"OK"}).
+							SetDoneFunc(func(int, string) {
+								pages.RemovePage("atheme_error_modal")
+							})
+						pages.AddPage("atheme_error_modal", errorModal, true, true)
+					})
+					return
+				}
+				f.Close()
+			}
+		}
+
+		updateProgress("Configuring Atheme...")
+
+		// Make scripts executable
+		autogenPath := filepath.Join(servicesDir, "autogen.sh")
+		configurePath := filepath.Join(servicesDir, "configure")
+		os.Chmod(autogenPath, 0755) // Ignore errors if file doesn't exist
+		os.Chmod(configurePath, 0755) // Ignore errors if file doesn't exist
+
+		// Run autogen/configure
+		cmd := exec.Command("./autogen.sh")
+		cmd.Dir = servicesDir
+		if _, err := cmd.CombinedOutput(); err != nil {
+			// Try configure directly if autogen fails
+			cmd = exec.Command("./configure", "--prefix="+servicesDir)
+			cmd.Dir = servicesDir
+			if output, err := cmd.CombinedOutput(); err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("atheme_install_modal")
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Configure failed: %v\nOutput: %s", err, string(output))).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("atheme_error_modal")
+						})
+					pages.AddPage("atheme_error_modal", errorModal, true, true)
+				})
+				return
+			}
+		} else {
+			// Run configure after autogen
+			cmd = exec.Command("./configure", "--prefix="+servicesDir)
+			cmd.Dir = servicesDir
+			if output, err := cmd.CombinedOutput(); err != nil {
+				app.QueueUpdateDraw(func() {
+					pages.RemovePage("atheme_install_modal")
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Configure failed: %v\nOutput: %s", err, string(output))).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(int, string) {
+							pages.RemovePage("atheme_error_modal")
+						})
+					pages.AddPage("atheme_error_modal", errorModal, true, true)
+				})
+				return
+			}
+		}
+
+		updateProgress("Building Atheme...")
+
+		// Run make
+		cmd = exec.Command("make")
+		cmd.Dir = servicesDir
+		if output, err := cmd.CombinedOutput(); err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("atheme_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Make failed: %v\nOutput: %s", err, string(output))).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("atheme_error_modal")
+					})
+				pages.AddPage("atheme_error_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		updateProgress("Installing Atheme...")
+
+		// Run make install
+		cmd = exec.Command("make", "install")
+		cmd.Dir = servicesDir
+		if output, err := cmd.CombinedOutput(); err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("atheme_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Make install failed: %v\nOutput: %s", err, string(output))).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("atheme_error_modal")
+					})
+				pages.AddPage("atheme_error_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		updateProgress("Configuring services...")
+
+		// Configure atheme.conf
+		athemeConfPath := filepath.Join(servicesDir, "etc", "atheme.conf")
+		if err := configureAthemeServices(athemeConfPath, buildDir); err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("atheme_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Failed to configure services: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("atheme_error_modal")
+					})
+				pages.AddPage("atheme_error_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		updateProgress("Configuring UnrealIRCd linking...")
+
+		// Configure UnrealIRCd for services linking
+		if err := configureUnrealForServices(buildDir, "services.localhost", "atheme"); err != nil {
+			app.QueueUpdateDraw(func() {
+				pages.RemovePage("atheme_install_modal")
+				errorModal := tview.NewModal().
+					SetText(fmt.Sprintf("Failed to configure UnrealIRCd: %v", err)).
+					AddButtons([]string{"OK"}).
+					SetDoneFunc(func(int, string) {
+						pages.RemovePage("atheme_error_modal")
+					})
+				pages.AddPage("atheme_error_modal", errorModal, true, true)
+			})
+			return
+		}
+
+		// Success
+		app.QueueUpdateDraw(func() {
+			pages.RemovePage("atheme_install_modal")
+			successModal := tview.NewModal().
+				SetText(fmt.Sprintf("Atheme Services %s installed successfully!\n\nServices directory: %s\n\nTo start services: cd %s && ./bin/atheme-services\n\nDon't forget to rehash UnrealIRCd after starting services.", release.TagName, servicesDir, servicesDir)).
+				AddButtons([]string{"OK"}).
+				SetDoneFunc(func(int, string) {
+					pages.RemovePage("atheme_success_modal")
+				})
+			pages.AddPage("atheme_success_modal", successModal, true, true)
+		})
+	}()
 }
 
 func uploadCustomModulePage(app *tview.Application, pages *tview.Pages, sourceDir string) {

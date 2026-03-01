@@ -40,9 +40,18 @@ A powerful terminal-based user interface (TUI) for managing UnrealIRCd IRC serve
 
 ## Prerequisites
 
-- Go 1.25.4 or later
-- Terminal with Unicode support
-- Internet connection for downloads and RPC
+- **Go 1.25.4 or later** — required to build the tool ([download](https://go.dev/dl/))
+- **Git** — to clone the repository
+- **Terminal with Unicode support** — e.g. xterm-256color, gnome-terminal, Konsole, iTerm2
+- **Internet connection** — for downloading UnrealIRCd source and RPC connectivity
+- **C build toolchain** (for compiling UnrealIRCd and modules):
+  - `gcc` or `cc`
+  - `make`
+  - `autoconf`
+- **Development libraries** (for compiling UnrealIRCd):
+  - OpenSSL/LibreSSL development headers (`libssl-dev` / `openssl-devel`)
+  - On Debian/Ubuntu: `sudo apt install build-essential pkg-config libssl-dev libcurl4-openssl-dev`
+  - On RHEL/Fedora: `sudo dnf install gcc make openssl-devel libcurl-devel`
 
 ## Installation
 
@@ -52,15 +61,18 @@ A powerful terminal-based user interface (TUI) for managing UnrealIRCd IRC serve
    cd unrealircd-tui
    ```
 
-2. **Build the application:**
+2. **Download dependencies and build:**
    ```bash
-   go build
+   go mod download
+   go build -o utui
    ```
 
 3. **Run the tool:**
    ```bash
    ./utui
    ```
+
+> **Note:** On first run, if no existing UnrealIRCd installation is detected, the tool will prompt you to download and set one up.
 
 ## Usage
 
@@ -140,6 +152,11 @@ unrealircd-tui/
 ## Troubleshooting
 
 ### Common Issues
+
+**Program exits immediately / nothing happens**
+- This was a known bug in older versions — the tool would silently exit if no UnrealIRCd installation was found. Update to the latest version.
+- Ensure you built with `go build -o utui` (not just copied the binary from another machine — it must be compiled for your OS/architecture).
+- Run with `file ./utui` to verify it matches your system architecture.
 
 **RPC Connection Failed**
 - Verify UnrealIRCd RPC is enabled and listening on the correct port
